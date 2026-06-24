@@ -1,0 +1,30 @@
+# Secrets — never commit
+.env
+*.env.local
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Reference third-party Odoo MCP addon (downloaded, not our code)
+mcp_server/
+
+# Docker volumes / local data
+pgdata/
+data/
+*.log
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Superpowers scratch (ledger is git-ignored scratch by design)
+.superpowers/
