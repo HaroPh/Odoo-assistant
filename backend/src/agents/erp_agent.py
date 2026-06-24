@@ -5,6 +5,8 @@ import uuid
 from langchain_openai import ChatOpenAI
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
 
 from .graph import build_graph
 
@@ -22,6 +24,7 @@ class ERPAgent:
     def __init__(self) -> None:
         self.graph = None
         self.tool_names: list[str] = []
+        self._pool = None
 
     async def setup(self) -> None:
         llm = ChatOpenAI(
@@ -34,7 +37,14 @@ class ERPAgent:
         tools = await client.get_tools()
         self.tool_names = [t.name for t in tools]
 
-        checkpointer = AsyncPostgresSaver.from_conn_string(PG_CONN)
+        self._pool = AsyncConnectionPool(
+            conninfo=PG_CONN,
+            max_size=20,
+            open=False,
+            kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
+        )
+        await self._pool.open()
+        checkpointer = AsyncPostgresSaver(self._pool)
         await checkpointer.setup()  # creates checkpoint tables if not present
 
         self.graph = build_graph(llm, tools, checkpointer)
@@ -53,3 +63,8 @@ class ERPAgent:
 
         result = await self.graph.ainvoke({"messages": messages}, config=config)
         return result["messages"][-1].content.strip()
+
+    async def aclose(self) -> None:
+        if self._pool is not None:
+            await self._pool.close()
+            self._pool = None
