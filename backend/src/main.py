@@ -27,6 +27,9 @@ async def lifespan(app: FastAPI):
     _state["agent"] = agent
     print(f"✓ ERP agent ready — tools: {agent.tool_names}")
     yield
+    agent = _state.get("agent")
+    if agent is not None:
+        await agent.aclose()
     _state.clear()
 
 
@@ -60,7 +63,10 @@ async def chat_completions(req: Request):
     messages = _filter_messages(body.get("messages", []))
 
     agent: ERPAgent = _state["agent"]
-    answer = await agent.chat(messages)
+    # Accept stable session_id from client (needed when write gate is unlocked).
+    # Defaults to per-request UUID (safe while WRITE_ACTIONS_ENABLED=false).
+    thread_id = body.get("session_id") or body.get("id")
+    answer = await agent.chat(messages, thread_id=thread_id)
 
     cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
