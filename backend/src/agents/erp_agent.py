@@ -61,6 +61,11 @@ class ERPAgent:
         tid = thread_id or uuid.uuid4().hex
         config = {"configurable": {"thread_id": tid}}
 
+        # NOTE (Phase 3): when WRITE_ACTIONS_ENABLED=true the write planner calls
+        # interrupt() and ainvoke returns with an "__interrupt__" key instead of a
+        # final AI message. This method does not yet detect that or wire
+        # Command(resume=...), so the confirmation question is not surfaced and
+        # resume is unreachable. Safe while the write gate is locked (default).
         result = await self.graph.ainvoke({"messages": messages}, config=config)
         return result["messages"][-1].content.strip()
 

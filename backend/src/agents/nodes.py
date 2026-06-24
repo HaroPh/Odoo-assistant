@@ -93,7 +93,8 @@ def make_erp_write_planner_node(llm):
             logger.warning("Write planner returned non-JSON: %s", response.content)
             return {"messages": [AIMessage(content="Không thể xác định thao tác cần thực hiện. Vui lòng mô tả rõ hơn.")]}
 
-        question = WRITE_CONFIRM_PREFIX + f"**{plan['summary']}**\n\nXác nhận? (có / không)"
+        summary = plan.get("summary") or plan.get("tool") or "thao tác"
+        question = WRITE_CONFIRM_PREFIX + f"**{summary}**\n\nXác nhận? (có / không)"
         confirmed = _interrupt({"question": question, "action": plan})
         return {"pending_action": plan, "confirmed": confirmed}
 

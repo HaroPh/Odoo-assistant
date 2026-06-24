@@ -86,6 +86,41 @@ async def test_executor_confirmed_true_returns_success():
 
 
 @pytest.mark.asyncio
+async def test_planner_handles_missing_summary_key(monkeypatch):
+    """When planner JSON has no 'summary' key, fallback to 'tool' value — no KeyError."""
+    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+
+    plan_json = json.dumps({
+        "tool": "create_sale_order",
+        "args": {},
+    })  # no 'summary' key
+    llm = make_mock_llm(plan_json)
+
+    interrupted_with = {}
+
+    class _FakeInterrupt(Exception):
+        pass
+
+    def fake_interrupt(payload):
+        interrupted_with["payload"] = payload
+        raise _FakeInterrupt("interrupt called")
+
+    import backend.src.agents.nodes as nodes_mod
+    monkeypatch.setattr(nodes_mod, "_interrupt", fake_interrupt)
+
+    from backend.src.agents.nodes import make_erp_write_planner_node
+    node = make_erp_write_planner_node(llm)
+
+    with pytest.raises(_FakeInterrupt):
+        await node(_write_state())
+
+    assert "question" in interrupted_with["payload"]
+    assert "create_sale_order" in interrupted_with["payload"]["question"]
+
+
+# ── Executor ─────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
 async def test_executor_confirmed_false_returns_cancel():
     from backend.src.agents.nodes import erp_write_executor_node
     state = ERPAgentState(
