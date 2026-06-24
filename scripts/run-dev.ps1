@@ -37,8 +37,11 @@ Write-Host "→ mcp-odoo đang khởi động (cửa sổ 1, :8001)..."
 Start-Sleep 3
 
 # 2) backend FastAPI :8000
+# Dùng run.py (KHÔNG `uvicorn src.main:app`): trên Windows psycopg3 async cần
+# SelectorEventLoop, mà uvicorn hardcode ProactorEventLoop cho single-process.
+# run.py dựng Selector loop trước khi chạy server (xem backend/run.py).
 Start-Process powershell -ArgumentList "-NoExit","-Command",
-    "$envSetup; cd '$root\backend'; & '$py' -m uvicorn src.main:app --host 0.0.0.0 --port 8000"
+    "$envSetup; cd '$root\backend'; & '$py' run.py"
 Write-Host "→ backend đang khởi động (cửa sổ 2, :8000)..."
 
 Write-Host "`nXong. Mở http://localhost:3000 (Open WebUI) → chọn model 'erp-assistant' → chat."
