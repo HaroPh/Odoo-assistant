@@ -5,10 +5,12 @@ import uuid
 from langchain_openai import ChatOpenAI
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.types import Command
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from .graph import build_graph
+from .confirmation import CONFIRM, UNCLEAR, classify_confirmation
 
 LITELLM_URL  = os.environ.get("LITELLM_URL", "http://localhost:4000/v1")
 LITELLM_KEY  = os.environ.get("LITELLM_MASTER_KEY", "")
@@ -20,17 +22,37 @@ PG_CONN      = os.environ.get(
 )
 
 
+def _question_from_interrupts(interrupts) -> str | None:
+    """Pull the confirmation question out of a tuple of Interrupt objects."""
+    for it in interrupts or ():
+        value = getattr(it, "value", None)
+        if isinstance(value, dict) and value.get("question"):
+            return value["question"]
+    return None
+
+
+def _pending_question(snapshot) -> str | None:
+    """Question of the interrupt a parked thread is currently waiting on."""
+    for task in getattr(snapshot, "tasks", ()) or ():
+        question = _question_from_interrupts(getattr(task, "interrupts", ()))
+        if question:
+            return question
+    return None
+
+
 class ERPAgent:
     def __init__(self) -> None:
         self.graph = None
         self.tool_names: list[str] = []
         self._pool = None
+        self._llm = None
 
     async def setup(self) -> None:
         llm = ChatOpenAI(
             model=MODEL, base_url=LITELLM_URL, api_key=LITELLM_KEY,
             temperature=0, timeout=120,
         )
+        self._llm = llm
         client = MultiServerMCPClient(
             {"odoo": {"url": MCP_ODOO_URL, "transport": "sse"}}
         )
@@ -61,12 +83,28 @@ class ERPAgent:
         tid = thread_id or uuid.uuid4().hex
         config = {"configurable": {"thread_id": tid}}
 
-        # NOTE (Phase 3): when WRITE_ACTIONS_ENABLED=true the write planner calls
-        # interrupt() and ainvoke returns with an "__interrupt__" key instead of a
-        # final AI message. This method does not yet detect that or wire
-        # Command(resume=...), so the confirmation question is not surfaced and
-        # resume is unreachable. Safe while the write gate is locked (default).
-        result = await self.graph.ainvoke({"messages": messages}, config=config)
+        # If the thread is parked at a write-confirmation interrupt, this turn is
+        # the user's answer — classify it and resume instead of starting over.
+        snapshot = await self.graph.aget_state(config)
+        if getattr(snapshot, "next", None):
+            reply = messages[-1]["content"]
+            verdict = await classify_confirmation(reply, self._llm)
+            if verdict == UNCLEAR:
+                # Don't guess on an ambiguous reply: re-ask, leave thread parked.
+                question = _pending_question(snapshot)
+                return question or "Bạn xác nhận thực hiện thao tác này? (có / không)"
+            result = await self.graph.ainvoke(
+                Command(resume=verdict == CONFIRM), config=config
+            )
+        else:
+            result = await self.graph.ainvoke({"messages": messages}, config=config)
+
+        # A write planner that called interrupt() surfaces as "__interrupt__" with
+        # no final AI message — return its confirmation question to the user.
+        question = _question_from_interrupts(result.get("__interrupt__"))
+        if question:
+            return question
+
         return result["messages"][-1].content.strip()
 
     async def aclose(self) -> None:
