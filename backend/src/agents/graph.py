@@ -6,7 +6,7 @@ from .nodes import (
     make_intent_router_node,
     make_erp_read_node,
     make_erp_write_planner_node,
-    erp_write_executor_node,
+    make_erp_write_executor_node,
     rag_node,
     make_respond_unknown_node,
 )
@@ -29,7 +29,7 @@ def build_graph(llm, tools, checkpointer) -> object:
     g.add_node("intent_router", make_intent_router_node(llm))
     g.add_node("erp_read", make_erp_read_node(llm, tools))
     g.add_node("erp_write_planner", make_erp_write_planner_node(llm))
-    g.add_node("erp_write_executor", erp_write_executor_node)
+    g.add_node("erp_write_executor", make_erp_write_executor_node(tools))
     g.add_node("rag", rag_node)
     g.add_node("respond_unknown", make_respond_unknown_node(llm))
 
