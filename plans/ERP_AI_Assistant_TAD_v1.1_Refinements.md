@@ -170,9 +170,11 @@ Cơ chế interrupt/resume đã chạy end-to-end, **nhưng khác plan ở tần
 
 Wiring nằm trong `ERPAgent.chat()` ([erp_agent.py](../backend/src/agents/erp_agent.py)): `aget_state()` để phát hiện thread đang parked → resume; nếu không thì chạy mới và surface `__interrupt__`. **Yêu cầu `thread_id` ổn định** (client phải gửi `session_id`).
 
+- **Write op #1 `confirm_sale_order` (slice 2026-06-26):** `erp_write_executor` không còn là STUB — nay là factory `make_erp_write_executor_node(tools)` tra tool theo tên và gọi MCP tool thật ([nodes.py](../backend/src/agents/nodes.py)). `action_confirm` đã whitelist trong gateway ([server.py](../mcp-servers/odoo/server.py)); planner prompt pin tên tool + arg key. Vẫn cần `WRITE_ACTIONS_ENABLED=true` + đơn draft thật để chạy live.
+
 **Còn nợ (chưa làm trong Phase 3):**
 - Timeout `confirmation_expires_at` (đoạn trên) — `write_executor` chưa reject theo hạn.
-- `WRITE_ACTIONS_ENABLED` vẫn `false`: `erp_write_executor` còn là STUB, chưa có MCP write tool thật vào Odoo.
+- `WRITE_ACTIONS_ENABLED` vẫn `false` theo mặc định: bật thủ công khi smoke test live. Mới có 1 write op (`confirm_sale_order`); create/update/purchase-confirm là op sau (chỉ thêm tool + 1 dòng prompt).
 - Message accumulation trên stable thread (N-1): non-resume turn vẫn truyền full history → checkpointer append trùng. Chưa ảnh hưởng vòng confirm (resume không truyền messages).
 
 ---
