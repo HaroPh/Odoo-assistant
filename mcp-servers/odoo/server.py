@@ -547,6 +547,99 @@ def confirm_sale_order(order_ref: str) -> str:
     return f"Đã xác nhận đơn {name}."
 
 
+# ─── READ TOOLS (T1 expansion) ────────────────────────────────────────────────
+
+@mcp.tool()
+def get_customer_invoices(partner_name: str | None = None,
+                          payment_state: str | None = None,
+                          limit: int = 50) -> str:
+    """Hóa đơn khách hàng (account.move, out_invoice đã phát hành).
+
+    Args:
+        partner_name: Lọc theo tên khách (tìm gần đúng).
+        payment_state: not_paid | in_payment | partial | paid | reversed.
+        limit: Số dòng tối đa.
+    """
+    domain = [["move_type", "=", "out_invoice"], ["state", "=", "posted"]]
+    if partner_name:
+        domain.append(["partner_id.name", "ilike", partner_name])
+    if payment_state:
+        domain.append(["payment_state", "=", payment_state])
+    rows = odoo("account.move", "search_read", [domain], {
+        "fields": ["name", "partner_id", "invoice_date", "invoice_date_due",
+                   "amount_total", "amount_residual", "payment_state"],
+        "limit": limit, "order": "invoice_date desc",
+    })
+    if not rows:
+        return "Không có hóa đơn khách hàng nào phù hợp."
+    lines = [f"{len(rows)} hóa đơn khách hàng:\n"]
+    for r in rows:
+        partner = r["partner_id"][1] if r["partner_id"] else "N/A"
+        lines.append(
+            f"  {r['name']} | {partner} | Ngày: {r.get('invoice_date') or 'N/A'} "
+            f"| Tổng: {r['amount_total']:,.0f} | Còn nợ: {r['amount_residual']:,.0f} "
+            f"| TT: {r['payment_state']}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_vendor_bills(vendor_name: str | None = None,
+                     payment_state: str | None = None,
+                     limit: int = 50) -> str:
+    """Hóa đơn nhà cung cấp (account.move, in_invoice đã phát hành).
+
+    Args:
+        vendor_name: Lọc theo tên nhà cung cấp (tìm gần đúng).
+        payment_state: not_paid | in_payment | partial | paid | reversed.
+        limit: Số dòng tối đa.
+    """
+    domain = [["move_type", "=", "in_invoice"], ["state", "=", "posted"]]
+    if vendor_name:
+        domain.append(["partner_id.name", "ilike", vendor_name])
+    if payment_state:
+        domain.append(["payment_state", "=", payment_state])
+    rows = odoo("account.move", "search_read", [domain], {
+        "fields": ["name", "partner_id", "invoice_date", "invoice_date_due",
+                   "amount_total", "amount_residual", "payment_state"],
+        "limit": limit, "order": "invoice_date desc",
+    })
+    if not rows:
+        return "Không có hóa đơn nhà cung cấp nào phù hợp."
+    lines = [f"{len(rows)} hóa đơn nhà cung cấp:\n"]
+    for r in rows:
+        partner = r["partner_id"][1] if r["partner_id"] else "N/A"
+        lines.append(
+            f"  {r['name']} | {partner} | Ngày: {r.get('invoice_date') or 'N/A'} "
+            f"| Tổng: {r['amount_total']:,.0f} | Còn nợ: {r['amount_residual']:,.0f} "
+            f"| TT: {r['payment_state']}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_overdue_invoices(limit: int = 50) -> str:
+    """Hóa đơn khách hàng quá hạn (chưa trả hết, đến hạn đã qua)."""
+    today = today_iso()
+    domain = [
+        ["move_type", "=", "out_invoice"], ["state", "=", "posted"],
+        ["payment_state", "in", ["not_paid", "partial"]],
+        ["invoice_date_due", "<", today],
+    ]
+    rows = odoo("account.move", "search_read", [domain], {
+        "fields": ["name", "partner_id", "invoice_date_due",
+                   "amount_total", "amount_residual"],
+        "limit": limit, "order": "invoice_date_due asc",
+    })
+    if not rows:
+        return "Không có hóa đơn nào quá hạn."
+    lines = [f"Ngày hiện tại: {today} — {len(rows)} hóa đơn quá hạn:\n"]
+    for r in rows:
+        partner = r["partner_id"][1] if r["partner_id"] else "N/A"
+        lines.append(
+            f"  {r['name']} | {partner} | Đến hạn: {r.get('invoice_date_due') or 'N/A'} "
+            f"| Còn nợ: {r['amount_residual']:,.0f} / {r['amount_total']:,.0f}")
+    return "\n".join(lines)
+
+
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
