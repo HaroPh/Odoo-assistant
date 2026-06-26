@@ -144,6 +144,17 @@ async def test_executor_confirmed_true_invokes_tool_and_returns_result():
 
 
 @pytest.mark.asyncio
+async def test_executor_extracts_text_from_content_block_result():
+    # langchain MCP tools return a list of content blocks, not a bare string.
+    # The executor must surface the clean text, not its repr.
+    from backend.src.agents.nodes import make_erp_write_executor_node
+    blocks = [{"type": "text", "text": "Đã xác nhận đơn S00003.", "id": "x"}]
+    node = make_erp_write_executor_node([_fake_tool("confirm_sale_order", result=blocks)])
+    result = await node(_exec_state(True))
+    assert result["messages"][0].content == "Đã xác nhận đơn S00003."
+
+
+@pytest.mark.asyncio
 async def test_executor_unknown_tool_returns_safe_message():
     from backend.src.agents.nodes import make_erp_write_executor_node
     node = make_erp_write_executor_node([_fake_tool("confirm_sale_order")])

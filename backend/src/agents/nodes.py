@@ -103,6 +103,23 @@ def make_erp_write_planner_node(llm):
 
 # ── erp_write_executor ────────────────────────────────────────────────────────
 
+def _tool_result_text(result) -> str:
+    """Normalize a tool result to plain text.
+
+    langchain MCP tools return a list of content-block dicts
+    (e.g. [{"type": "text", "text": "..."}]) rather than a bare string;
+    surface the joined text, not its repr.
+    """
+    if isinstance(result, str):
+        return result
+    if isinstance(result, list):
+        parts = [b.get("text", "") if isinstance(b, dict) else str(b)
+                 for b in result]
+        joined = "".join(parts).strip()
+        return joined or str(result)
+    return str(result)
+
+
 def make_erp_write_executor_node(tools):
     """Execute the confirmed write by invoking the named tool directly.
 
@@ -130,6 +147,6 @@ def make_erp_write_executor_node(tools):
             return {"messages": [AIMessage(
                 content=f"Lỗi khi thực hiện thao tác: {e}"
             )]}
-        return {"messages": [AIMessage(content=str(result))]}
+        return {"messages": [AIMessage(content=_tool_result_text(result))]}
 
     return erp_write_executor
