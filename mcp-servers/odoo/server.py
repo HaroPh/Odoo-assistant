@@ -589,7 +589,8 @@ def post_invoice(invoice_ref: str) -> str:
     """
     rows = odoo("account.move", "search_read",
                 [[["name", "=", invoice_ref]]],
-                {"fields": ["id", "name", "state", "move_type"], "limit": 2})
+                {"fields": ["id", "name", "state", "move_type"],  # move_type: fetched for spec/future per-type messaging
+                 "limit": 2})
     if not rows:
         return f"Không tìm thấy hóa đơn '{invoice_ref}'."
     if len(rows) > 1:

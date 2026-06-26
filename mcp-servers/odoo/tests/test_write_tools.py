@@ -86,6 +86,14 @@ def test_post_invoice_not_found(monkeypatch):
     assert "không tìm thấy" in fn("post_invoice")("INV/2026/99999").lower()
 
 
+def test_post_invoice_ambiguous(monkeypatch):
+    patch_odoo(monkeypatch, {"account.move": [
+        {"id": 1, "name": "INV/2026/00001", "state": "draft", "move_type": "out_invoice"},
+        {"id": 2, "name": "INV/2026/00001", "state": "draft", "move_type": "out_invoice"},
+    ]})
+    assert "nhiều" in fn("post_invoice")("INV/2026/00001").lower()
+
+
 def test_post_invoice_already_posted_idempotent(monkeypatch):
     cap = []
     patch_odoo(monkeypatch,
