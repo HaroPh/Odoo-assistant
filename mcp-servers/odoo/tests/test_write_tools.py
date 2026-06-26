@@ -77,3 +77,43 @@ def test_confirm_po_sent_calls_button_confirm(monkeypatch):
     out = fn("confirm_purchase_order")("P00006")
     assert "đã xác nhận" in out.lower()
     assert ("purchase.order", "button_confirm", [[6]]) in cap
+
+
+# ── post_invoice ──────────────────────────────────────────────────────────────
+
+def test_post_invoice_not_found(monkeypatch):
+    patch_odoo(monkeypatch, {"account.move": []})
+    assert "không tìm thấy" in fn("post_invoice")("INV/2026/99999").lower()
+
+
+def test_post_invoice_already_posted_idempotent(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch,
+               {"account.move": [{"id": 10, "name": "INV/2026/00001",
+                                   "state": "posted", "move_type": "out_invoice"}]},
+               confirm_capture=cap)
+    out = fn("post_invoice")("INV/2026/00001")
+    assert "đã được phát hành" in out.lower()
+    assert cap == []  # action_post NOT called
+
+
+def test_post_invoice_cancelled(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch,
+               {"account.move": [{"id": 11, "name": "INV/2026/00002",
+                                   "state": "cancel", "move_type": "out_invoice"}]},
+               confirm_capture=cap)
+    out = fn("post_invoice")("INV/2026/00002")
+    assert "hủy" in out.lower()
+    assert cap == []
+
+
+def test_post_invoice_draft_calls_action_post(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch,
+               {"account.move": [{"id": 12, "name": "INV/2026/00003",
+                                   "state": "draft", "move_type": "out_invoice"}]},
+               confirm_capture=cap)
+    out = fn("post_invoice")("INV/2026/00003")
+    assert "đã phát hành" in out.lower()
+    assert ("account.move", "action_post", [[12]]) in cap

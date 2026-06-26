@@ -45,6 +45,7 @@ ODOO_METHOD_OPERATION_MAP = {
     "action_archive": "write", "message_post": "write",
     "action_confirm": "write",
     "button_confirm": "write",
+    "action_post": "write",
     # UNLINK — Phase 3: cần confirmation + cảnh báo
     "unlink": "unlink", "action_delete": "unlink",
 }
@@ -573,6 +574,34 @@ def confirm_purchase_order(order_ref: str) -> str:
 
     odoo("purchase.order", "button_confirm", [[order["id"]]])
     return f"Đã xác nhận đơn mua {name}."
+
+
+@mcp.tool()
+def post_invoice(invoice_ref: str) -> str:
+    """Phát hành hóa đơn (account.move) từ trạng thái nháp.
+    draft → posted. Áp dụng cho cả hóa đơn bán và hóa đơn mua.
+    YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        invoice_ref: Số hóa đơn, ví dụ "INV/2026/00001".
+    """
+    rows = odoo("account.move", "search_read",
+                [[["name", "=", invoice_ref]]],
+                {"fields": ["id", "name", "state", "move_type"], "limit": 2})
+    if not rows:
+        return f"Không tìm thấy hóa đơn '{invoice_ref}'."
+    if len(rows) > 1:
+        return f"Có nhiều hóa đơn tên '{invoice_ref}'. Vui lòng nêu rõ hơn."
+
+    inv = rows[0]
+    name, state = inv["name"], inv["state"]
+    if state == "posted":
+        return f"Hóa đơn {name} đã được phát hành rồi."
+    if state == "cancel":
+        return f"Hóa đơn {name} đã bị hủy, không thể phát hành."
+
+    odoo("account.move", "action_post", [[inv["id"]]])
+    return f"Đã phát hành hóa đơn {name}."
 
 
 # ─── READ TOOLS (T1 expansion) ────────────────────────────────────────────────
