@@ -43,6 +43,7 @@ ODOO_METHOD_OPERATION_MAP = {
     # WRITE — Phase 3: cần confirmation
     "write": "write", "toggle_active": "write",
     "action_archive": "write", "message_post": "write",
+    "action_confirm": "write",
     # UNLINK — Phase 3: cần confirmation + cảnh báo
     "unlink": "unlink", "action_delete": "unlink",
 }
