@@ -44,6 +44,7 @@ ODOO_METHOD_OPERATION_MAP = {
     "write": "write", "toggle_active": "write",
     "action_archive": "write", "message_post": "write",
     "action_confirm": "write",
+    "button_confirm": "write",
     # UNLINK — Phase 3: cần confirmation + cảnh báo
     "unlink": "unlink", "action_delete": "unlink",
 }
@@ -545,6 +546,33 @@ def confirm_sale_order(order_ref: str) -> str:
 
     odoo("sale.order", "action_confirm", [[order["id"]]])
     return f"Đã xác nhận đơn {name}."
+
+
+@mcp.tool()
+def confirm_purchase_order(order_ref: str) -> str:
+    """Xác nhận đơn mua hàng (purchase.order) đang ở trạng thái nháp.
+    draft/sent → purchase. YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        order_ref: Mã đơn mua, ví dụ "P00003".
+    """
+    rows = odoo("purchase.order", "search_read",
+                [[["name", "=", order_ref]]],
+                {"fields": ["id", "name", "state"], "limit": 2})
+    if not rows:
+        return f"Không tìm thấy đơn mua '{order_ref}'."
+    if len(rows) > 1:
+        return f"Có nhiều đơn mua tên '{order_ref}'. Vui lòng nêu rõ hơn."
+
+    order = rows[0]
+    name, state = order["name"], order["state"]
+    if state in ("purchase", "done"):
+        return f"Đơn mua {name} đã được xác nhận rồi."
+    if state == "cancel":
+        return f"Đơn mua {name} đã bị hủy, không thể xác nhận."
+
+    odoo("purchase.order", "button_confirm", [[order["id"]]])
+    return f"Đã xác nhận đơn mua {name}."
 
 
 # ─── READ TOOLS (T1 expansion) ────────────────────────────────────────────────
