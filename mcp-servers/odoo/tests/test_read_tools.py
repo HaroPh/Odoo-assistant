@@ -187,3 +187,35 @@ def test_search_leads_salesperson_filter(monkeypatch):
     out = fn("search_leads")(salesperson="Joel")
     assert ["user_id.name", "ilike", "Joel"] in calls[0]["args"][0]
     assert "Không" in out
+
+
+# ── manufacturing ─────────────────────────────────────────────────────────────
+
+def test_manufacturing_orders_happy(monkeypatch):
+    rows = [{"name": "MO/0001", "product_id": [5, "Thành phẩm X"],
+             "product_qty": 10.0, "state": "confirmed",
+             "date_start": "2026-06-21 08:00:00"}]
+    calls = patch_odoo(monkeypatch, {"mrp.production": rows})
+    out = fn("get_manufacturing_orders")(state="confirmed")
+    assert calls[0]["model"] == "mrp.production"
+    assert ["state", "=", "confirmed"] in calls[0]["args"][0]
+    # uses date_start, not date_planned_start
+    assert "date_start" in calls[0]["kwargs"]["fields"]
+    assert "MO/0001" in out and "Thành phẩm X" in out
+
+
+def test_bom_not_found(monkeypatch):
+    patch_odoo(monkeypatch, {"mrp.bom": []})
+    assert "không tìm thấy" in fn("get_bom")("Khong Co").lower()
+
+
+def test_bom_lists_components(monkeypatch):
+    boms = [{"id": 3, "code": "BOM-X", "product_tmpl_id": [5, "Thành phẩm X"],
+             "product_qty": 1.0}]
+    comps = [{"product_id": [6, "Linh kiện B"], "product_qty": 2.0},
+             {"product_id": [7, "Linh kiện C"], "product_qty": 1.0}]
+    calls = patch_odoo(monkeypatch, {"mrp.bom": boms, "mrp.bom.line": comps})
+    out = fn("get_bom")("Thành phẩm X")
+    assert "Thành phẩm X" in out and "Linh kiện B" in out and "Linh kiện C" in out
+    line_call = [c for c in calls if c["model"] == "mrp.bom.line"][0]
+    assert ["bom_id", "=", 3] in line_call["args"][0]

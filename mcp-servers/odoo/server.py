@@ -851,6 +851,62 @@ def search_leads(type: str | None = None, salesperson: str | None = None,
     return "\n".join(lines)
 
 
+@mcp.tool()
+def get_manufacturing_orders(state: str | None = None, limit: int = 50) -> str:
+    """Lệnh sản xuất (mrp.production).
+
+    Args:
+        state: draft|confirmed|progress|to_close|done|cancel (bỏ trống = tất cả).
+        limit: Số dòng tối đa.
+    """
+    domain: list = []
+    if state:
+        domain.append(["state", "=", state])
+    rows = odoo("mrp.production", "search_read", [domain], {
+        "fields": ["name", "product_id", "product_qty", "state", "date_start"],
+        "limit": limit, "order": "date_start desc",
+    })
+    if not rows:
+        return "Không có lệnh sản xuất nào phù hợp."
+    lines = [f"{len(rows)} lệnh sản xuất:\n"]
+    for r in rows:
+        product = r["product_id"][1] if r.get("product_id") else "N/A"
+        start = (r.get("date_start") or "N/A")[:16]
+        lines.append(
+            f"  {r['name']} | SP: {product:30s} | SL: {r['product_qty']:.1f} "
+            f"| Trạng thái: {r['state']} | Bắt đầu: {start}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_bom(product_name: str) -> str:
+    """Định mức nguyên vật liệu (BOM) của một sản phẩm.
+
+    Args:
+        product_name: Tên sản phẩm cần xem BOM (tìm gần đúng).
+    """
+    boms = odoo("mrp.bom", "search_read",
+                [[["product_tmpl_id.name", "ilike", product_name]]],
+                {"fields": ["id", "code", "product_tmpl_id", "product_qty"], "limit": 5})
+    if not boms:
+        return f"Không tìm thấy BOM cho '{product_name}'."
+    if len(boms) > 1:
+        names = ", ".join((b["product_tmpl_id"][1] if b["product_tmpl_id"] else "?")
+                          for b in boms)
+        return f"Có nhiều BOM khớp '{product_name}': {names}. Vui lòng nêu rõ hơn."
+    b = boms[0]
+    comps = odoo("mrp.bom.line", "search_read", [[["bom_id", "=", b["id"]]]],
+                 {"fields": ["product_id", "product_qty"], "order": "id asc"})
+    product = b["product_tmpl_id"][1] if b["product_tmpl_id"] else "N/A"
+    out = [f"BOM: {product} (tạo {b['product_qty']:.0f} đơn vị)\n  Thành phần:"]
+    if not comps:
+        out.append("    (không có thành phần)")
+    for c in comps:
+        cp = c["product_id"][1] if c.get("product_id") else "N/A"
+        out.append(f"    - {cp:35s} x {c['product_qty']:.2f}")
+    return "\n".join(out)
+
+
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
