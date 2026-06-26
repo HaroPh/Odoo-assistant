@@ -23,7 +23,10 @@ Rules:
 WRITE_PLANNER_PROMPT = """You are an ERP assistant planning a write operation.
 
 Available write tools — use the tool name and arg keys EXACTLY as written:
-- confirm_sale_order(order_ref: str)   # order_ref = mã đơn bán, ví dụ "S00012"
+- confirm_sale_order(order_ref: str)          # order_ref = mã đơn bán, vd "S00012"
+- confirm_purchase_order(order_ref: str)      # order_ref = mã đơn mua, vd "P00003"
+- post_invoice(invoice_ref: str)              # invoice_ref = số hóa đơn, vd "INV/2026/00001"
+- validate_picking(picking_ref: str)          # picking_ref = mã phiếu, vd "WH/OUT/00001"
 
 From the user's message, choose the matching tool and extract its args.
 Also write a short Vietnamese summary (1 sentence, start with a verb).
