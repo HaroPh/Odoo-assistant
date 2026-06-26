@@ -46,6 +46,8 @@ ODOO_METHOD_OPERATION_MAP = {
     "action_confirm": "write",
     "button_confirm": "write",
     "action_post": "write",
+    "button_validate": "write",
+    "action_set_quantities_to_reservation": "write",
     # UNLINK — Phase 3: cần confirmation + cảnh báo
     "unlink": "unlink", "action_delete": "unlink",
 }
@@ -602,6 +604,44 @@ def post_invoice(invoice_ref: str) -> str:
 
     odoo("account.move", "action_post", [[inv["id"]]])
     return f"Đã phát hành hóa đơn {name}."
+
+
+@mcp.tool()
+def validate_picking(picking_ref: str) -> str:
+    """Xác nhận phiếu giao/nhận hàng (stock.picking) đã được reserve đủ.
+    Chỉ hoạt động khi state = 'assigned' (đã reserve). Tự động set số lượng
+    thực = số lượng reserve trước khi validate để tránh popup wizard.
+    YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        picking_ref: Mã phiếu, ví dụ "WH/OUT/00001" hoặc "WH/IN/00005".
+    """
+    rows = odoo("stock.picking", "search_read",
+                [[["name", "=", picking_ref]]],
+                {"fields": ["id", "name", "state"], "limit": 2})
+    if not rows:
+        return f"Không tìm thấy phiếu '{picking_ref}'."
+    if len(rows) > 1:
+        return f"Có nhiều phiếu tên '{picking_ref}'. Vui lòng nêu rõ hơn."
+
+    pick = rows[0]
+    name, state = pick["name"], pick["state"]
+    if state == "done":
+        return f"Phiếu {name} đã được xác nhận rồi."
+    if state == "cancel":
+        return f"Phiếu {name} đã bị hủy."
+    if state != "assigned":
+        return (f"Phiếu {name} chưa sẵn sàng (trạng thái: {state}). "
+                f"Cần reserve đủ hàng trước khi xác nhận.")
+
+    # Avoid wizard triggers: set qty_done = qty_reserved on all move lines
+    odoo("stock.picking", "action_set_quantities_to_reservation", [[pick["id"]]])
+
+    result = odoo("stock.picking", "button_validate", [[pick["id"]]])
+    if isinstance(result, dict):
+        return (f"Phiếu {name} cần thao tác bổ sung trên Odoo "
+                f"(wizard không hỗ trợ qua API). Vui lòng xử lý trực tiếp.")
+    return f"Đã xác nhận phiếu {name}."
 
 
 # ─── READ TOOLS (T1 expansion) ────────────────────────────────────────────────

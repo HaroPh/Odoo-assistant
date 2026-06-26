@@ -117,3 +117,88 @@ def test_post_invoice_draft_calls_action_post(monkeypatch):
     out = fn("post_invoice")("INV/2026/00003")
     assert "đã phát hành" in out.lower()
     assert ("account.move", "action_post", [[12]]) in cap
+
+
+# ── validate_picking ──────────────────────────────────────────────────────────
+
+def test_validate_picking_not_found(monkeypatch):
+    patch_odoo(monkeypatch, {"stock.picking": []})
+    assert "không tìm thấy" in fn("validate_picking")("WH/OUT/99999").lower()
+
+
+def test_validate_picking_ambiguous(monkeypatch):
+    patch_odoo(monkeypatch, {"stock.picking": [
+        {"id": 1, "name": "WH/OUT/0001", "state": "assigned"},
+        {"id": 2, "name": "WH/OUT/0001", "state": "assigned"},
+    ]})
+    assert "nhiều" in fn("validate_picking")("WH/OUT/0001").lower()
+
+
+def test_validate_picking_done_idempotent(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch,
+               {"stock.picking": [{"id": 10, "name": "WH/OUT/0010",
+                                    "state": "done"}]},
+               confirm_capture=cap)
+    out = fn("validate_picking")("WH/OUT/0010")
+    assert "đã được xác nhận" in out.lower()
+    assert cap == []
+
+
+def test_validate_picking_cancelled(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch,
+               {"stock.picking": [{"id": 11, "name": "WH/OUT/0011",
+                                    "state": "cancel"}]},
+               confirm_capture=cap)
+    out = fn("validate_picking")("WH/OUT/0011")
+    assert "hủy" in out.lower()
+    assert cap == []
+
+
+def test_validate_picking_not_assigned_refused(monkeypatch):
+    for bad_state in ("draft", "waiting", "confirmed"):
+        cap = []
+        patch_odoo(monkeypatch,
+                   {"stock.picking": [{"id": 20, "name": "WH/OUT/0020",
+                                        "state": bad_state}]},
+                   confirm_capture=cap)
+        out = fn("validate_picking")("WH/OUT/0020")
+        assert "chưa sẵn sàng" in out.lower() or "chưa" in out.lower()
+        assert cap == []
+
+
+def test_validate_picking_assigned_calls_set_qty_then_validate(monkeypatch):
+    """assigned → set_quantities_to_reservation THEN button_validate, in order."""
+    call_order = []
+
+    def fake_odoo(model, method, args, kwargs=None, tool_name=None):
+        if method == "search_read":
+            return [{"id": 30, "name": "WH/OUT/0030", "state": "assigned"}]
+        call_order.append(method)
+        return True  # both write calls succeed
+
+    monkeypatch.setattr(server, "odoo", fake_odoo)
+    out = fn("validate_picking")("WH/OUT/0030")
+    assert call_order == ["action_set_quantities_to_reservation", "button_validate"]
+    assert "đã xác nhận" in out.lower()
+
+
+def test_validate_picking_wizard_fallback(monkeypatch):
+    """If button_validate returns a dict (unexpected wizard), emit safe message."""
+    call_order = []
+
+    def fake_odoo(model, method, args, kwargs=None, tool_name=None):
+        if method == "search_read":
+            return [{"id": 31, "name": "WH/OUT/0031", "state": "assigned"}]
+        call_order.append(method)
+        if method == "button_validate":
+            return {"type": "ir.actions.act_window", "res_model": "stock.backorder.confirmation"}
+        return True
+
+    monkeypatch.setattr(server, "odoo", fake_odoo)
+    out = fn("validate_picking")("WH/OUT/0031")
+    assert "cần thao tác bổ sung" in out.lower() or "bổ sung" in out.lower()
+    # Both methods were still called
+    assert "action_set_quantities_to_reservation" in call_order
+    assert "button_validate" in call_order
