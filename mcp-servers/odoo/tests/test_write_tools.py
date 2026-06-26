@@ -67,3 +67,13 @@ def test_confirm_po_draft_calls_button_confirm(monkeypatch):
     out = fn("confirm_purchase_order")("P00005")
     assert "đã xác nhận" in out.lower()
     assert ("purchase.order", "button_confirm", [[5]]) in cap
+
+
+def test_confirm_po_sent_calls_button_confirm(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch,
+               {"purchase.order": [{"id": 6, "name": "P00006", "state": "sent"}]},
+               confirm_capture=cap)
+    out = fn("confirm_purchase_order")("P00006")
+    assert "đã xác nhận" in out.lower()
+    assert ("purchase.order", "button_confirm", [[6]]) in cap
