@@ -640,6 +640,77 @@ def get_overdue_invoices(limit: int = 50) -> str:
     return "\n".join(lines)
 
 
+def _format_pickings(rows, title: str) -> str:
+    if not rows:
+        return f"Không có {title} nào phù hợp."
+    lines = [f"{len(rows)} {title}:\n"]
+    for r in rows:
+        partner = r["partner_id"][1] if r.get("partner_id") else "N/A"
+        sched = (r.get("scheduled_date") or "N/A")[:16]
+        lines.append(
+            f"  {r['name']} | {partner} | Dự kiến: {sched} "
+            f"| Trạng thái: {r['state']} | Nguồn: {r.get('origin') or '-'}")
+    return "\n".join(lines)
+
+
+_PICKING_FIELDS = ["name", "partner_id", "scheduled_date", "state", "origin"]
+
+
+@mcp.tool()
+def get_deliveries(state: str | None = None, partner_name: str | None = None,
+                   limit: int = 50) -> str:
+    """Phiếu giao hàng (stock.picking, outgoing).
+
+    Args:
+        state: draft|waiting|confirmed|assigned|done|cancel (bỏ trống = tất cả).
+        partner_name: Lọc theo tên khách (tìm gần đúng).
+        limit: Số dòng tối đa.
+    """
+    domain = [["picking_type_code", "=", "outgoing"]]
+    if state:
+        domain.append(["state", "=", state])
+    if partner_name:
+        domain.append(["partner_id.name", "ilike", partner_name])
+    rows = odoo("stock.picking", "search_read", [domain],
+                {"fields": _PICKING_FIELDS, "limit": limit,
+                 "order": "scheduled_date desc"})
+    return _format_pickings(rows, "phiếu giao hàng")
+
+
+@mcp.tool()
+def get_receipts(state: str | None = None, limit: int = 50) -> str:
+    """Phiếu nhận hàng (stock.picking, incoming).
+
+    Args:
+        state: draft|waiting|confirmed|assigned|done|cancel (bỏ trống = tất cả).
+        limit: Số dòng tối đa.
+    """
+    domain = [["picking_type_code", "=", "incoming"]]
+    if state:
+        domain.append(["state", "=", state])
+    rows = odoo("stock.picking", "search_read", [domain],
+                {"fields": _PICKING_FIELDS, "limit": limit,
+                 "order": "scheduled_date desc"})
+    return _format_pickings(rows, "phiếu nhận hàng")
+
+
+@mcp.tool()
+def get_internal_transfers(state: str | None = None, limit: int = 50) -> str:
+    """Phiếu điều chuyển nội bộ (stock.picking, internal).
+
+    Args:
+        state: draft|waiting|confirmed|assigned|done|cancel (bỏ trống = tất cả).
+        limit: Số dòng tối đa.
+    """
+    domain = [["picking_type_code", "=", "internal"]]
+    if state:
+        domain.append(["state", "=", state])
+    rows = odoo("stock.picking", "search_read", [domain],
+                {"fields": _PICKING_FIELDS, "limit": limit,
+                 "order": "scheduled_date desc"})
+    return _format_pickings(rows, "phiếu điều chuyển nội bộ")
+
+
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
