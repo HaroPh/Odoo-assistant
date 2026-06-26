@@ -711,6 +711,56 @@ def get_internal_transfers(state: str | None = None, limit: int = 50) -> str:
     return _format_pickings(rows, "phiếu điều chuyển nội bộ")
 
 
+@mcp.tool()
+def search_lots(product_name: str | None = None, limit: int = 50) -> str:
+    """Tra cứu Lô / Số sê-ri (stock.lot) và tồn hiện tại.
+
+    Args:
+        product_name: Lọc theo tên sản phẩm (tìm gần đúng).
+        limit: Số dòng tối đa.
+    """
+    domain: list = []
+    if product_name:
+        domain.append(["product_id.name", "ilike", product_name])
+    rows = odoo("stock.lot", "search_read", [domain],
+                {"fields": ["name", "product_id", "product_qty"],
+                 "limit": limit, "order": "product_id asc"})
+    if not rows:
+        return "Không tìm thấy lô/sê-ri nào phù hợp."
+    lines = [f"{len(rows)} lô/sê-ri:\n"]
+    for r in rows:
+        product = r["product_id"][1] if r.get("product_id") else "N/A"
+        lines.append(f"  {r['name']:20s} | SP: {product:35s} | Tồn: {r['product_qty']:.1f}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def search_products(name: str | None = None, limit: int = 50) -> str:
+    """Tra cứu sản phẩm (product.product): giá bán, giá vốn, tồn kho.
+
+    Args:
+        name: Tìm theo tên hoặc mã nội bộ (tìm gần đúng).
+        limit: Số dòng tối đa.
+    """
+    domain: list = []
+    if name:
+        domain = ["|", ["name", "ilike", name], ["default_code", "ilike", name]]
+    rows = odoo("product.product", "search_read", [domain],
+                {"fields": ["name", "default_code", "list_price",
+                            "standard_price", "qty_available", "uom_id"],
+                 "limit": limit, "order": "name asc"})
+    if not rows:
+        return "Không tìm thấy sản phẩm nào phù hợp."
+    lines = [f"{len(rows)} sản phẩm:\n"]
+    for r in rows:
+        uom = r["uom_id"][1] if r.get("uom_id") else ""
+        lines.append(
+            f"  [{r.get('default_code') or '-'}] {r['name']:35s} "
+            f"| Giá bán: {r['list_price']:,.0f} | Giá vốn: {r['standard_price']:,.0f} "
+            f"| Tồn: {r['qty_available']:.1f} {uom}")
+    return "\n".join(lines)
+
+
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

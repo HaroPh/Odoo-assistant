@@ -92,3 +92,38 @@ def test_deliveries_state_filter_applied(monkeypatch):
     calls = patch_odoo(monkeypatch, {"stock.picking": []})
     fn("get_deliveries")(state="done")
     assert ["state", "=", "done"] in calls[0]["args"][0]
+
+
+# ── lots + products ───────────────────────────────────────────────────────────
+
+def test_search_lots_happy(monkeypatch):
+    rows = [{"name": "LOT0001", "product_id": [3, "Paracetamol"], "product_qty": 120.0}]
+    calls = patch_odoo(monkeypatch, {"stock.lot": rows})
+    out = fn("search_lots")(product_name="Para")
+    assert calls[0]["model"] == "stock.lot"
+    assert ["product_id.name", "ilike", "Para"] in calls[0]["args"][0]
+    assert "LOT0001" in out and "120" in out
+
+
+def test_search_lots_empty(monkeypatch):
+    patch_odoo(monkeypatch, {"stock.lot": []})
+    assert "Không" in fn("search_lots")()
+
+
+def test_search_products_or_domain_on_name_and_code(monkeypatch):
+    rows = [{"name": "Office Chair", "default_code": "FURN-01",
+             "list_price": 120.0, "standard_price": 70.0,
+             "qty_available": 15.0, "uom_id": [1, "Units"]}]
+    calls = patch_odoo(monkeypatch, {"product.product": rows})
+    out = fn("search_products")(name="chair")
+    domain = calls[0]["args"][0]
+    assert domain[0] == "|"
+    assert ["name", "ilike", "chair"] in domain
+    assert ["default_code", "ilike", "chair"] in domain
+    assert "Office Chair" in out and "FURN-01" in out
+
+
+def test_search_products_no_filter_empty_domain(monkeypatch):
+    calls = patch_odoo(monkeypatch, {"product.product": []})
+    fn("search_products")()
+    assert calls[0]["args"][0] == []
