@@ -70,21 +70,6 @@ async def test_write_planner_enabled_calls_interrupt(monkeypatch):
     assert "42" in interrupted_with["payload"]["question"] or "tạo" in interrupted_with["payload"]["question"].lower()
 
 
-# ── Executor ─────────────────────────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_executor_confirmed_true_returns_success():
-    from backend.src.agents.nodes import erp_write_executor_node
-    state = ERPAgentState(
-        messages=[HumanMessage("Tạo đơn")],
-        intent="erp_write",
-        pending_action={"tool": "create_sale_order", "args": {}, "summary": "test"},
-        confirmed=True,
-    )
-    result = await erp_write_executor_node(state)
-    assert "thành công" in result["messages"][0].content.lower() or "thực hiện" in result["messages"][0].content.lower()
-
-
 @pytest.mark.asyncio
 async def test_planner_handles_missing_summary_key(monkeypatch):
     """When planner JSON has no 'summary' key, fallback to 'tool' value — no KeyError."""
@@ -118,16 +103,58 @@ async def test_planner_handles_missing_summary_key(monkeypatch):
     assert "create_sale_order" in interrupted_with["payload"]["question"]
 
 
-# ── Executor ─────────────────────────────────────────────────────────────────
+# ── Executor (factory) ───────────────────────────────────────────────────────
+
+def _fake_tool(name, result="OK", raises=None):
+    t = MagicMock()
+    t.name = name
+    if raises is not None:
+        t.ainvoke = AsyncMock(side_effect=raises)
+    else:
+        t.ainvoke = AsyncMock(return_value=result)
+    return t
+
+
+def _exec_state(confirmed, tool="confirm_sale_order", args=None):
+    return ERPAgentState(
+        messages=[HumanMessage("Xác nhận đơn S00012")],
+        intent="erp_write",
+        pending_action={"tool": tool, "args": args or {"order_ref": "S00012"},
+                        "summary": "x"},
+        confirmed=confirmed,
+    )
+
 
 @pytest.mark.asyncio
 async def test_executor_confirmed_false_returns_cancel():
-    from backend.src.agents.nodes import erp_write_executor_node
-    state = ERPAgentState(
-        messages=[HumanMessage("Tạo đơn")],
-        intent="erp_write",
-        pending_action={"tool": "create_sale_order", "args": {}, "summary": "test"},
-        confirmed=False,
-    )
-    result = await erp_write_executor_node(state)
+    from backend.src.agents.nodes import make_erp_write_executor_node
+    node = make_erp_write_executor_node([_fake_tool("confirm_sale_order")])
+    result = await node(_exec_state(False))
     assert "hủy" in result["messages"][0].content.lower()
+
+
+@pytest.mark.asyncio
+async def test_executor_confirmed_true_invokes_tool_and_returns_result():
+    from backend.src.agents.nodes import make_erp_write_executor_node
+    tool = _fake_tool("confirm_sale_order", result="Đã xác nhận đơn S00012.")
+    node = make_erp_write_executor_node([tool])
+    result = await node(_exec_state(True))
+    assert result["messages"][0].content == "Đã xác nhận đơn S00012."
+    tool.ainvoke.assert_awaited_once_with({"order_ref": "S00012"})
+
+
+@pytest.mark.asyncio
+async def test_executor_unknown_tool_returns_safe_message():
+    from backend.src.agents.nodes import make_erp_write_executor_node
+    node = make_erp_write_executor_node([_fake_tool("confirm_sale_order")])
+    result = await node(_exec_state(True, tool="create_invoice"))
+    assert "không khả dụng" in result["messages"][0].content.lower()
+
+
+@pytest.mark.asyncio
+async def test_executor_tool_raises_returns_safe_message():
+    from backend.src.agents.nodes import make_erp_write_executor_node
+    tool = _fake_tool("confirm_sale_order", raises=RuntimeError("boom"))
+    node = make_erp_write_executor_node([tool])
+    result = await node(_exec_state(True))
+    assert "lỗi" in result["messages"][0].content.lower()

@@ -103,14 +103,33 @@ def make_erp_write_planner_node(llm):
 
 # ── erp_write_executor ────────────────────────────────────────────────────────
 
-async def erp_write_executor_node(state: ERPAgentState) -> dict:
-    if not state.get("confirmed"):
-        return {"messages": [AIMessage(content="Đã hủy thao tác.")]}
+def make_erp_write_executor_node(tools):
+    """Execute the confirmed write by invoking the named tool directly.
 
-    action = state.get("pending_action") or {}
-    # STUB: real MCP write tool will replace this when WRITE_ACTIONS_ENABLED=true
-    logger.info("STUB write: tool=%s args=%s", action.get("tool"), action.get("args"))
-    return {"messages": [AIMessage(
-        content=f"[STUB] Đã thực hiện thành công: {action.get('summary', action.get('tool', '?'))}. "
-                "(Chế độ mô phỏng — chưa ghi vào Odoo thật.)"
-    )]}
+    Security (write-gate, rate-limit) lives in the MCP gateway; domain
+    validation lives in the tool. Here we only route + fail safe so a bad
+    plan never crashes the graph.
+    """
+    by_name = {t.name: t for t in tools}
+
+    async def erp_write_executor(state: ERPAgentState) -> dict:
+        if not state.get("confirmed"):
+            return {"messages": [AIMessage(content="Đã hủy thao tác.")]}
+
+        action = state.get("pending_action") or {}
+        name = action.get("tool")
+        tool = by_name.get(name)
+        if tool is None:
+            return {"messages": [AIMessage(
+                content=f"Thao tác '{name}' không khả dụng."
+            )]}
+        try:
+            result = await tool.ainvoke(action.get("args") or {})
+        except Exception as e:
+            logger.exception("write executor failed: tool=%s", name)
+            return {"messages": [AIMessage(
+                content=f"Lỗi khi thực hiện thao tác: {e}"
+            )]}
+        return {"messages": [AIMessage(content=str(result))]}
+
+    return erp_write_executor
