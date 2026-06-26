@@ -21,15 +21,17 @@ Rules:
 - Greetings / small talk → unknown."""
 
 WRITE_PLANNER_PROMPT = """You are an ERP assistant planning a write operation.
-Extract from the user's message:
-1. The operation type (create_sale_order / update_inventory / confirm_purchase / other)
-2. The key parameters needed
-3. A short Vietnamese summary of what will happen (1 sentence, start with a verb)
 
-Respond in JSON:
+Available write tools — use the tool name and arg keys EXACTLY as written:
+- confirm_sale_order(order_ref: str)   # order_ref = mã đơn bán, ví dụ "S00012"
+
+From the user's message, choose the matching tool and extract its args.
+Also write a short Vietnamese summary (1 sentence, start with a verb).
+
+Respond in JSON only:
 {
-  "tool": "<operation_type>",
-  "args": {<key_param>: <value>},
+  "tool": "<exact tool name, or \\"other\\" if none match>",
+  "args": {<exact arg keys>},
   "summary": "<Vietnamese summary>"
 }"""
 
