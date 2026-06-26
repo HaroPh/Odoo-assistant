@@ -167,3 +167,23 @@ def test_purchase_detail_lists_lines(monkeypatch):
     assert "P00003" in out and "Ốc vít" in out
     line_call = [c for c in calls if c["model"] == "purchase.order.line"][0]
     assert ["order_id", "=", 5] in line_call["args"][0]
+
+
+# ── crm ───────────────────────────────────────────────────────────────────────
+
+def test_search_leads_happy(monkeypatch):
+    rows = [{"name": "Cơ hội A", "contact_name": "Anh B", "email_from": "b@x.com",
+             "stage_id": [2, "Qualified"], "expected_revenue": 5000.0,
+             "probability": 40.0, "user_id": [3, "NV Sales"], "type": "opportunity"}]
+    calls = patch_odoo(monkeypatch, {"crm.lead": rows})
+    out = fn("search_leads")(type="opportunity")
+    assert calls[0]["model"] == "crm.lead"
+    assert ["type", "=", "opportunity"] in calls[0]["args"][0]
+    assert "Cơ hội A" in out and "Qualified" in out and "5,000" in out
+
+
+def test_search_leads_salesperson_filter(monkeypatch):
+    calls = patch_odoo(monkeypatch, {"crm.lead": []})
+    out = fn("search_leads")(salesperson="Joel")
+    assert ["user_id.name", "ilike", "Joel"] in calls[0]["args"][0]
+    assert "Không" in out

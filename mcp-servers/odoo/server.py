@@ -819,6 +819,38 @@ def get_purchase_order_detail(order_ref: str) -> str:
     return "\n".join(out)
 
 
+@mcp.tool()
+def search_leads(type: str | None = None, salesperson: str | None = None,
+                 limit: int = 50) -> str:
+    """Tra cứu Lead / Cơ hội (crm.lead).
+
+    Args:
+        type: "lead" hoặc "opportunity" (bỏ trống = cả hai).
+        salesperson: Lọc theo tên nhân viên phụ trách (tìm gần đúng).
+        limit: Số dòng tối đa.
+    """
+    domain: list = []
+    if type:
+        domain.append(["type", "=", type])
+    if salesperson:
+        domain.append(["user_id.name", "ilike", salesperson])
+    rows = odoo("crm.lead", "search_read", [domain], {
+        "fields": ["name", "contact_name", "email_from", "stage_id",
+                   "expected_revenue", "probability", "user_id", "type"],
+        "limit": limit, "order": "expected_revenue desc",
+    })
+    if not rows:
+        return "Không tìm thấy lead/cơ hội nào phù hợp."
+    lines = [f"{len(rows)} lead/cơ hội:\n"]
+    for r in rows:
+        stage = r["stage_id"][1] if r.get("stage_id") else "N/A"
+        sp = r["user_id"][1] if r.get("user_id") else "N/A"
+        lines.append(
+            f"  {r['name']} | LH: {r.get('contact_name') or '-'} | GĐ: {stage} "
+            f"| Dự kiến: {r['expected_revenue']:,.0f} ({r['probability']:.0f}%) | NV: {sp}")
+    return "\n".join(lines)
+
+
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
