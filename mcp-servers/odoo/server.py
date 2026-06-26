@@ -519,6 +519,34 @@ def get_top_products(by: str = "quantity", period: str | None = None,
     return "\n".join(lines)
 
 
+@mcp.tool()
+def confirm_sale_order(order_ref: str) -> str:
+    """
+    Xác nhận một đơn bán hàng (sale.order) đang ở trạng thái nháp.
+    draft/sent → sale. YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        order_ref: Mã đơn bán, ví dụ "S00012".
+    """
+    rows = odoo("sale.order", "search_read",
+                [[["name", "=", order_ref]]],
+                {"fields": ["id", "name", "state"], "limit": 2})
+    if not rows:
+        return f"Không tìm thấy đơn '{order_ref}'."
+    if len(rows) > 1:
+        return f"Có nhiều đơn tên '{order_ref}'. Vui lòng nêu rõ hơn."
+
+    order = rows[0]
+    name, state = order["name"], order["state"]
+    if state in ("sale", "done"):
+        return f"Đơn {name} đã được xác nhận rồi."
+    if state == "cancel":
+        return f"Đơn {name} đã bị hủy, không thể xác nhận."
+
+    odoo("sale.order", "action_confirm", [[order["id"]]])
+    return f"Đã xác nhận đơn {name}."
+
+
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
