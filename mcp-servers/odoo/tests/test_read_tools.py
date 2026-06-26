@@ -127,3 +127,43 @@ def test_search_products_no_filter_empty_domain(monkeypatch):
     calls = patch_odoo(monkeypatch, {"product.product": []})
     fn("search_products")()
     assert calls[0]["args"][0] == []
+
+
+# ── order detail ──────────────────────────────────────────────────────────────
+
+def test_sale_detail_not_found(monkeypatch):
+    patch_odoo(monkeypatch, {"sale.order": []})
+    assert "không tìm thấy" in fn("get_sale_order_detail")("S99999").lower()
+
+
+def test_sale_detail_ambiguous(monkeypatch):
+    patch_odoo(monkeypatch, {"sale.order": [
+        {"id": 1, "name": "S001", "partner_id": [1, "A"], "amount_total": 1.0},
+        {"id": 2, "name": "S001", "partner_id": [1, "A"], "amount_total": 2.0}]})
+    assert "nhiều" in fn("get_sale_order_detail")("S001").lower()
+
+
+def test_sale_detail_lists_lines(monkeypatch):
+    order = [{"id": 7, "name": "S00014", "partner_id": [4, "Ready Mat"],
+              "amount_total": 900.0}]
+    lines = [{"product_id": [9, "Bàn gỗ"], "product_uom_qty": 3.0,
+              "price_unit": 300.0, "price_subtotal": 900.0}]
+    calls = patch_odoo(monkeypatch, {"sale.order": order, "sale.order.line": lines})
+    out = fn("get_sale_order_detail")("S00014")
+    assert "S00014" in out and "Ready Mat" in out
+    assert "Bàn gỗ" in out and "900" in out
+    line_call = [c for c in calls if c["model"] == "sale.order.line"][0]
+    assert ["order_id", "=", 7] in line_call["args"][0]
+
+
+def test_purchase_detail_lists_lines(monkeypatch):
+    order = [{"id": 5, "name": "P00003", "partner_id": [2, "Vendor"],
+              "amount_total": 500.0}]
+    lines = [{"product_id": [8, "Ốc vít"], "product_qty": 100.0,
+              "price_unit": 5.0, "price_subtotal": 500.0}]
+    calls = patch_odoo(monkeypatch, {"purchase.order": order,
+                                     "purchase.order.line": lines})
+    out = fn("get_purchase_order_detail")("P00003")
+    assert "P00003" in out and "Ốc vít" in out
+    line_call = [c for c in calls if c["model"] == "purchase.order.line"][0]
+    assert ["order_id", "=", 5] in line_call["args"][0]

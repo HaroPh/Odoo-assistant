@@ -761,6 +761,64 @@ def search_products(name: str | None = None, limit: int = 50) -> str:
     return "\n".join(lines)
 
 
+@mcp.tool()
+def get_sale_order_detail(order_ref: str) -> str:
+    """Chi tiết dòng sản phẩm của một đơn bán (sale.order).
+
+    Args:
+        order_ref: Mã đơn bán, ví dụ "S00012".
+    """
+    orders = odoo("sale.order", "search_read", [[["name", "=", order_ref]]],
+                  {"fields": ["id", "name", "partner_id", "amount_total"], "limit": 2})
+    if not orders:
+        return f"Không tìm thấy đơn '{order_ref}'."
+    if len(orders) > 1:
+        return f"Có nhiều đơn tên '{order_ref}'. Vui lòng nêu rõ hơn."
+    o = orders[0]
+    rows = odoo("sale.order.line", "search_read", [[["order_id", "=", o["id"]]]],
+                {"fields": ["product_id", "product_uom_qty", "price_unit",
+                            "price_subtotal"], "order": "id asc"})
+    partner = o["partner_id"][1] if o["partner_id"] else "N/A"
+    out = [f"Đơn {o['name']} | Khách: {partner} | Tổng: {o['amount_total']:,.0f}\n"]
+    if not rows:
+        out.append("  (không có dòng sản phẩm)")
+    for ln in rows:
+        product = ln["product_id"][1] if ln.get("product_id") else "N/A"
+        out.append(
+            f"  {product:35s} | SL: {ln['product_uom_qty']:.1f} "
+            f"| Đơn giá: {ln['price_unit']:,.0f} | Thành tiền: {ln['price_subtotal']:,.0f}")
+    return "\n".join(out)
+
+
+@mcp.tool()
+def get_purchase_order_detail(order_ref: str) -> str:
+    """Chi tiết dòng sản phẩm của một đơn mua (purchase.order).
+
+    Args:
+        order_ref: Mã đơn mua, ví dụ "P00003".
+    """
+    orders = odoo("purchase.order", "search_read", [[["name", "=", order_ref]]],
+                  {"fields": ["id", "name", "partner_id", "amount_total"], "limit": 2})
+    if not orders:
+        return f"Không tìm thấy đơn '{order_ref}'."
+    if len(orders) > 1:
+        return f"Có nhiều đơn tên '{order_ref}'. Vui lòng nêu rõ hơn."
+    o = orders[0]
+    rows = odoo("purchase.order.line", "search_read", [[["order_id", "=", o["id"]]]],
+                {"fields": ["product_id", "product_qty", "price_unit",
+                            "price_subtotal"], "order": "id asc"})
+    partner = o["partner_id"][1] if o["partner_id"] else "N/A"
+    out = [f"Đơn {o['name']} | NCC: {partner} | Tổng: {o['amount_total']:,.0f}\n"]
+    if not rows:
+        out.append("  (không có dòng sản phẩm)")
+    for ln in rows:
+        product = ln["product_id"][1] if ln.get("product_id") else "N/A"
+        out.append(
+            f"  {product:35s} | SL: {ln['product_qty']:.1f} "
+            f"| Đơn giá: {ln['price_unit']:,.0f} | Thành tiền: {ln['price_subtotal']:,.0f}")
+    return "\n".join(out)
+
+
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
