@@ -43,7 +43,7 @@ Kiểm tra `.venv` thực tế (không phải giả định trong TAD):
 
 | # | Mức | Vấn đề | Mục fix | Chặn phase nào |
 |---|---|---|---|---|
-| 1 | 🔴 | LangGraph confirmation gate dùng API không tồn tại (`__confirmation_resume__`) | 2.1 | Phase 1 (write: Phase 3) |
+| 1 | ✅ | LangGraph confirmation gate dùng API không tồn tại (`__confirmation_resume__`) — **đã sửa: `interrupt()` trong write_planner + `chat()` resume (commit 1db2427)** | 2.1 | ~~Phase 3~~ DONE |
 | 2 | 🔴 | `ts_rank` bị gọi nhầm là BM25 → retrieval kém | 2.2 | Phase 2 |
 | 3 | 🔴 | VRAM 8GB không đủ cho LLM + embedding cùng GPU | 2.3 | Setup |
 | 4 | 🟡 | SQL guard `startswith("SELECT")` quá yếu | 3.1 | Phase 1 go-live |
@@ -155,6 +155,25 @@ result = await graph.ainvoke(
 ```
 
 > Timeout 5 phút (TAD §8.4 quy tắc 3): xử lý ở **application layer**, không ở graph — lưu `confirmation_expires_at` khi tạo interrupt; nếu user resume sau hạn thì `write_executor` reject. Đừng dựa vào graph tự hết hạn.
+
+#### ✅ Đã implement (Phase 3, commit 1db2427)
+
+Cơ chế interrupt/resume đã chạy end-to-end, **nhưng khác plan ở tầng client** vì MVP dùng **Open WebUI (chat)** chứ không phải Next.js có nút bấm:
+
+| Khía cạnh | Plan gốc (§2.1, frontend buttons) | Đã implement (MVP, chat text) |
+|---|---|---|
+| Vị trí `interrupt()` | node `confirmation_gate` riêng | gọi *trong* `erp_write_planner` ([nodes.py](../backend/src/agents/nodes.py)) |
+| Client gửi quyết định | nút "Xác nhận/Huỷ" → `Command(resume={"confirmed": bool})` | user gõ "có/không" → classifier → `Command(resume=<bool>)` |
+| Phân loại câu trả lời | không cần (button = nhị phân) | [confirmation.py](../backend/src/agents/confirmation.py): keyword fast-path + LLM fallback → `CONFIRM/CANCEL/UNCLEAR` |
+| Câu trả lời mơ hồ | n/a | `UNCLEAR` → hỏi lại, **không** đoán (fail-safe deny) |
+| State fields | `requires_confirmation` / `confirmation_received` | `pending_action` / `confirmed` (đã có sẵn từ Task 5) |
+
+Wiring nằm trong `ERPAgent.chat()` ([erp_agent.py](../backend/src/agents/erp_agent.py)): `aget_state()` để phát hiện thread đang parked → resume; nếu không thì chạy mới và surface `__interrupt__`. **Yêu cầu `thread_id` ổn định** (client phải gửi `session_id`).
+
+**Còn nợ (chưa làm trong Phase 3):**
+- Timeout `confirmation_expires_at` (đoạn trên) — `write_executor` chưa reject theo hạn.
+- `WRITE_ACTIONS_ENABLED` vẫn `false`: `erp_write_executor` còn là STUB, chưa có MCP write tool thật vào Odoo.
+- Message accumulation trên stable thread (N-1): non-resume turn vẫn truyền full history → checkpointer append trùng. Chưa ảnh hưởng vòng confirm (resume không truyền messages).
 
 ---
 
