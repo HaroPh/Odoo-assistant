@@ -578,32 +578,34 @@ def confirm_purchase_order(order_ref: str) -> str:
 
 
 @mcp.tool()
-def post_invoice(invoice_ref: str) -> str:
-    """Phát hành hóa đơn (account.move) từ trạng thái nháp.
-    draft → posted. Áp dụng cho cả hóa đơn bán và hóa đơn mua.
+def post_invoice(partner_name: str) -> str:
+    """Phát hành hóa đơn nháp (account.move draft → posted) của một khách hàng.
+    Áp dụng cho cả hóa đơn bán và hóa đơn mua. Hóa đơn nháp CHƯA có số (số được
+    cấp khi phát hành), nên tra theo tên khách hàng/nhà cung cấp.
     YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
 
     Args:
-        invoice_ref: Số hóa đơn, ví dụ "INV/2026/00001".
+        partner_name: Tên khách hàng/nhà cung cấp của hóa đơn nháp (tìm gần đúng).
     """
     rows = odoo("account.move", "search_read",
-                [[["name", "=", invoice_ref]]],
-                {"fields": ["id", "name", "state", "move_type"],  # move_type: fetched for spec/future per-type messaging
+                [[["move_type", "in", ["out_invoice", "in_invoice"]],
+                  ["state", "=", "draft"],
+                  ["partner_id.name", "ilike", partner_name]]],
+                {"fields": ["id", "partner_id", "amount_total", "move_type"],
                  "limit": 2})
     if not rows:
-        return f"Không tìm thấy hóa đơn '{invoice_ref}'."
+        return f"Không tìm thấy hóa đơn nháp nào của '{partner_name}'."
     if len(rows) > 1:
-        return f"Có nhiều hóa đơn tên '{invoice_ref}'. Vui lòng nêu rõ hơn."
+        return (f"Có nhiều hóa đơn nháp của '{partner_name}'. "
+                f"Vui lòng nêu rõ hơn.")
 
     inv = rows[0]
-    name, state = inv["name"], inv["state"]
-    if state == "posted":
-        return f"Hóa đơn {name} đã được phát hành rồi."
-    if state == "cancel":
-        return f"Hóa đơn {name} đã bị hủy, không thể phát hành."
-
+    partner = inv["partner_id"][1] if inv["partner_id"] else partner_name
     odoo("account.move", "action_post", [[inv["id"]]])
-    return f"Đã phát hành hóa đơn {name}."
+    # Số hóa đơn chỉ được cấp sau khi phát hành — đọc lại để lấy.
+    posted = odoo("account.move", "read", [[inv["id"]]], {"fields": ["name"]})
+    name = posted[0]["name"] if posted else "?"
+    return f"Đã phát hành hóa đơn {name} cho {partner}."
 
 
 @mcp.tool()

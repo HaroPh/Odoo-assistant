@@ -16,5 +16,5 @@ def test_planner_prompt_advertises_t2_contracts():
     assert "confirm_purchase_order" in WRITE_PLANNER_PROMPT
     assert "post_invoice" in WRITE_PLANNER_PROMPT
     assert "validate_picking" in WRITE_PLANNER_PROMPT
-    assert "invoice_ref" in WRITE_PLANNER_PROMPT
+    assert "partner_name" in WRITE_PLANNER_PROMPT
     assert "picking_ref" in WRITE_PLANNER_PROMPT
