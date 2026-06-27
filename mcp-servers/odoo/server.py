@@ -47,7 +47,6 @@ ODOO_METHOD_OPERATION_MAP = {
     "button_confirm": "write",
     "action_post": "write",
     "button_validate": "write",
-    "action_set_quantities_to_reservation": "write",
     # UNLINK — Phase 3: cần confirmation + cảnh báo
     "unlink": "unlink", "action_delete": "unlink",
 }
@@ -610,8 +609,10 @@ def post_invoice(invoice_ref: str) -> str:
 @mcp.tool()
 def validate_picking(picking_ref: str) -> str:
     """Xác nhận phiếu giao/nhận hàng (stock.picking) đã được reserve đủ.
-    Chỉ hoạt động khi state = 'assigned' (đã reserve). Tự động set số lượng
-    thực = số lượng reserve trước khi validate để tránh popup wizard.
+    Chỉ hoạt động khi state = 'assigned' — ở trạng thái này Odoo 19 đã tự set
+    số lượng thực = số lượng reserve trên mọi dòng, nên button_validate chạy
+    thẳng (không pop wizard). Nếu vẫn trả về dict (vd backorder một phần) thì
+    báo an toàn để xử lý trực tiếp trên Odoo.
     YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
 
     Args:
@@ -635,9 +636,8 @@ def validate_picking(picking_ref: str) -> str:
         return (f"Phiếu {name} chưa sẵn sàng (trạng thái: {state}). "
                 f"Cần reserve đủ hàng trước khi xác nhận.")
 
-    # Avoid wizard triggers: set qty_done = qty_reserved on all move lines
-    odoo("stock.picking", "action_set_quantities_to_reservation", [[pick["id"]]])
-
+    # Odoo 19: an 'assigned' picking already has done-qty = reserved on every
+    # move, so button_validate completes directly (no immediate-transfer wizard).
     result = odoo("stock.picking", "button_validate", [[pick["id"]]])
     if isinstance(result, dict):
         return (f"Phiếu {name} cần thao tác bổ sung trên Odoo "

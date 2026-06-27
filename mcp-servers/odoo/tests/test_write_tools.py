@@ -7,8 +7,7 @@ def patch_odoo(monkeypatch, by_model, confirm_capture=None):
     def fake_odoo(model, method, args, kwargs=None, tool_name=None):
         calls.append({"model": model, "method": method, "args": args})
         if confirm_capture is not None and method in (
-            "button_confirm", "action_post",
-            "action_set_quantities_to_reservation", "button_validate",
+            "button_confirm", "action_post", "button_validate",
         ):
             confirm_capture.append((model, method, args))
             return True
@@ -176,19 +175,19 @@ def test_validate_picking_not_assigned_refused(monkeypatch):
         assert cap == []
 
 
-def test_validate_picking_assigned_calls_set_qty_then_validate(monkeypatch):
-    """assigned → set_quantities_to_reservation THEN button_validate, in order."""
+def test_validate_picking_assigned_calls_button_validate(monkeypatch):
+    """assigned → button_validate directly (Odoo 19 auto-sets done qty on reserve)."""
     call_order = []
 
     def fake_odoo(model, method, args, kwargs=None, tool_name=None):
         if method == "search_read":
             return [{"id": 30, "name": "WH/OUT/0030", "state": "assigned"}]
         call_order.append(method)
-        return True  # both write calls succeed
+        return True
 
     monkeypatch.setattr(server, "odoo", fake_odoo)
     out = fn("validate_picking")("WH/OUT/0030")
-    assert call_order == ["action_set_quantities_to_reservation", "button_validate"]
+    assert call_order == ["button_validate"]
     assert "đã xác nhận" in out.lower()
 
 
@@ -207,6 +206,4 @@ def test_validate_picking_wizard_fallback(monkeypatch):
     monkeypatch.setattr(server, "odoo", fake_odoo)
     out = fn("validate_picking")("WH/OUT/0031")
     assert "cần thao tác bổ sung" in out.lower() or "bổ sung" in out.lower()
-    # Both methods were still called
-    assert "action_set_quantities_to_reservation" in call_order
-    assert "button_validate" in call_order
+    assert call_order == ["button_validate"]
