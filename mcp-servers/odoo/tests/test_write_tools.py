@@ -409,6 +409,15 @@ def test_gateway_other_fault_reraises(monkeypatch):
         server.odoo("res.partner", "search_read", [[]])
 
 
+def test_gateway_allow_none_only_fault_reraises(monkeypatch):
+    # A fault mentioning "allow_none" but NOT "cannot marshal None" must re-raise
+    # (the narrow condition only swallows the genuine serialization artifact).
+    fault = xmlrpc.client.Fault(3, "UserError: vui lòng bật allow_none trong cấu hình")
+    _patch_execute_raises(monkeypatch, fault)
+    with pytest.raises(xmlrpc.client.Fault):
+        server.odoo("res.partner", "search_read", [[]])
+
+
 # ── inventory_adjustment ──────────────────────────────────────────────────────
 
 def test_inventory_adjustment_negative_rejected(monkeypatch):

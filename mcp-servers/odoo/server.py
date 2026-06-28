@@ -178,7 +178,7 @@ def odoo(model: str, method: str, args: list, kwargs: dict | None = None,
         # post-commit, so treat it as a successful void return. A method that
         # itself raised produces a different Fault (carrying its traceback), which
         # does NOT match and falls through to error + re-raise below.
-        if "cannot marshal None" in str(e) or "allow_none" in str(e):
+        if "cannot marshal None" in str(e):
             log_mcp_event("model_access", tool_name=tool_name, model_name=model, operation=op,
                           duration_ms=int((time.monotonic() - start) * 1000))
             return None
