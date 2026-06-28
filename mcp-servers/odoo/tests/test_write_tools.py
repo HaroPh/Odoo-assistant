@@ -407,3 +407,113 @@ def test_gateway_other_fault_reraises(monkeypatch):
     _patch_execute_raises(monkeypatch, fault)
     with pytest.raises(xmlrpc.client.Fault):
         server.odoo("res.partner", "search_read", [[]])
+
+
+# ── inventory_adjustment ──────────────────────────────────────────────────────
+
+def test_inventory_adjustment_negative_rejected(monkeypatch):
+    calls = []
+    def fake_odoo(model, method, args, kwargs=None, tool_name=None):
+        calls.append((model, method, args))
+        return []
+    monkeypatch.setattr(server, "odoo", fake_odoo)
+    out = fn("inventory_adjustment")("Large Cabinet", -5)
+    assert "không hợp lệ" in out.lower()
+    assert calls == []  # nothing touched
+
+
+def test_inventory_adjustment_product_not_found(monkeypatch):
+    patch_odoo(monkeypatch, {("product.product", "search_read"): []})
+    out = fn("inventory_adjustment")("Nonexistent", 10)
+    assert "không tìm thấy" in out.lower()
+
+
+def test_inventory_adjustment_location_ambiguous_aborts(monkeypatch):
+    calls = []
+    def fake_odoo(model, method, args, kwargs=None, tool_name=None):
+        calls.append((model, method, args))
+        if model == "product.product":
+            return [{"id": 20, "name": "Large Cabinet", "default_code": "X",
+                     "list_price": 1.0}]
+        if model == "stock.location":
+            return [{"id": 5, "complete_name": "WH/Tồn kho"},
+                    {"id": 27, "complete_name": "My Co/Tồn kho"}]
+        return []
+    monkeypatch.setattr(server, "odoo", fake_odoo)
+    out = fn("inventory_adjustment")("Large Cabinet", 50, "Tồn kho")
+    assert "nhiều" in out.lower()
+    assert not any(c[1] in ("write", "create", "action_apply_inventory")
+                   for c in calls)
+
+
+def test_inventory_adjustment_existing_quant_sets_and_applies(monkeypatch):
+    calls = []
+    def fake_odoo(model, method, args, kwargs=None, tool_name=None):
+        calls.append((model, method, args))
+        if model == "product.product":
+            return [{"id": 20, "name": "Large Cabinet", "default_code": "FURN",
+                     "list_price": 100.0}]
+        if model == "stock.warehouse":
+            return [{"lot_stock_id": [5, "WH/Tồn kho"]}]
+        if model == "stock.quant" and method == "search_read":
+            return [{"id": 3, "quantity": 500.0}]
+        if model == "stock.quant" and method == "write":
+            return True
+        if model == "stock.quant" and method == "action_apply_inventory":
+            return None
+        if model == "stock.quant" and method == "read":
+            return [{"quantity": 480.0}]
+        return []
+    monkeypatch.setattr(server, "odoo", fake_odoo)
+    out = fn("inventory_adjustment")("Large Cabinet", 480)
+    assert ("stock.quant", "write", [[3], {"inventory_quantity": 480}]) in calls
+    assert ("stock.quant", "action_apply_inventory", [[3]]) in calls
+    assert "500" in out and "480" in out and "Large Cabinet" in out
+
+
+def test_inventory_adjustment_no_quant_creates_and_applies(monkeypatch):
+    calls = []
+    def fake_odoo(model, method, args, kwargs=None, tool_name=None):
+        calls.append((model, method, args))
+        if model == "product.product":
+            return [{"id": 19, "name": "Corner Desk", "default_code": "E6",
+                     "list_price": 100.0}]
+        if model == "stock.warehouse":
+            return [{"lot_stock_id": [5, "WH/Tồn kho"]}]
+        if model == "stock.quant" and method == "search_read":
+            return []  # no existing quant
+        if model == "stock.quant" and method == "create":
+            return 77
+        if model == "stock.quant" and method == "action_apply_inventory":
+            return None
+        if model == "stock.quant" and method == "read":
+            return [{"quantity": 30.0}]
+        return []
+    monkeypatch.setattr(server, "odoo", fake_odoo)
+    out = fn("inventory_adjustment")("Corner Desk", 30)
+    assert any(c[0] == "stock.quant" and c[1] == "create" and
+               c[2][0] == {"product_id": 19, "location_id": 5,
+                           "inventory_quantity": 30}
+               for c in calls)
+    assert ("stock.quant", "action_apply_inventory", [[77]]) in calls
+    assert "0" in out and "30" in out
+
+
+def test_inventory_adjustment_conflict_dict_safe_message(monkeypatch):
+    def fake_odoo(model, method, args, kwargs=None, tool_name=None):
+        if model == "product.product":
+            return [{"id": 20, "name": "Large Cabinet", "default_code": "X",
+                     "list_price": 1.0}]
+        if model == "stock.warehouse":
+            return [{"lot_stock_id": [5, "WH/Tồn kho"]}]
+        if model == "stock.quant" and method == "search_read":
+            return [{"id": 3, "quantity": 500.0}]
+        if model == "stock.quant" and method == "write":
+            return True
+        if model == "stock.quant" and method == "action_apply_inventory":
+            return {"type": "ir.actions.act_window",
+                    "res_model": "stock.inventory.conflict"}
+        return []
+    monkeypatch.setattr(server, "odoo", fake_odoo)
+    out = fn("inventory_adjustment")("Large Cabinet", 480)
+    assert "xung đột" in out.lower()

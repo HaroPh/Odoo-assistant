@@ -47,6 +47,7 @@ ODOO_METHOD_OPERATION_MAP = {
     "button_confirm": "write",
     "action_post": "write",
     "button_validate": "write",
+    "action_apply_inventory": "write",
     # UNLINK — Phase 3: cần confirmation + cảnh báo
     "unlink": "unlink", "action_delete": "unlink",
 }
@@ -783,6 +784,70 @@ def create_rfq(supplier_name: str, lines: list) -> str:
     po = odoo("purchase.order", "read", [[pid]], {"fields": ["name"]})
     name = po[0]["name"] if po else "?"
     return f"Đã tạo RFQ {name} cho {vendor['name']} ({len(lines)} dòng)."
+
+
+@mcp.tool()
+def inventory_adjustment(product_name: str, new_qty: float,
+                         location_name: str | None = None) -> str:
+    """Điều chỉnh tồn kho thực tế của một sản phẩm về một SỐ TUYỆT ĐỐI tại một
+    vị trí kho (kiểm kê). new_qty là tồn kho KẾT QUẢ mong muốn, không phải lượng
+    tăng/giảm. Nếu không nêu vị trí thì dùng kho chính. YÊU CẦU XÁC NHẬN từ người
+    dùng trước khi gọi.
+
+    Args:
+        product_name: Tên sản phẩm lưu kho (tìm gần đúng).
+        new_qty: Tồn kho kết quả mong muốn (>= 0).
+        location_name: Tên vị trí kho (tùy chọn; bỏ trống = kho chính).
+    """
+    if new_qty < 0:
+        return "Số lượng tồn kho không hợp lệ (không âm)."
+
+    prod, msg = _resolve_product(product_name, "is_storable")
+    if msg:
+        return msg
+
+    if location_name:
+        lrows = odoo("stock.location", "search_read",
+                     [[["usage", "=", "internal"],
+                       ["complete_name", "ilike", location_name]]],
+                     {"fields": ["id", "complete_name"], "limit": 6})
+        loc, lmsg = resolve_unique(
+            lrows, "vị trí kho",
+            describe=lambda r: r["complete_name"],
+            hint="Vui lòng nêu rõ tên vị trí kho.")
+        if lmsg:
+            return lmsg
+    else:
+        wh = odoo("stock.warehouse", "search_read", [[]],
+                  {"fields": ["lot_stock_id"], "limit": 1})
+        if not wh:
+            return "Không tìm thấy kho mặc định."
+        loc = {"id": wh[0]["lot_stock_id"][0],
+               "complete_name": wh[0]["lot_stock_id"][1]}
+
+    quants = odoo("stock.quant", "search_read",
+                  [[["product_id", "=", prod["id"]],
+                    ["location_id", "=", loc["id"]]]],
+                  {"fields": ["id", "quantity"], "limit": 1})
+    if quants:
+        qid = quants[0]["id"]
+        old = quants[0]["quantity"]
+        odoo("stock.quant", "write", [[qid], {"inventory_quantity": new_qty}])
+    else:
+        old = 0.0
+        qid = odoo("stock.quant", "create",
+                   [{"product_id": prod["id"], "location_id": loc["id"],
+                     "inventory_quantity": new_qty}])
+
+    res = odoo("stock.quant", "action_apply_inventory", [[qid]])
+    if isinstance(res, dict):
+        return (f"Tồn kho {prod['name']} cần xử lý xung đột kiểm kê trên Odoo "
+                f"(sản phẩm theo lô/sê-ri). Vui lòng xử lý trực tiếp.")
+
+    q = odoo("stock.quant", "read", [[qid]], {"fields": ["quantity"]})
+    now = q[0]["quantity"] if q else new_qty
+    return (f"Đã điều chỉnh tồn kho {prod['name']} tại {loc['complete_name']}: "
+            f"{old:g} → {now:g}.")
 
 
 # ─── READ TOOLS (T1 expansion) ────────────────────────────────────────────────
