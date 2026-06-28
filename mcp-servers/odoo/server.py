@@ -170,6 +170,21 @@ def odoo(model: str, method: str, args: list, kwargs: dict | None = None,
         log_mcp_event("model_access", tool_name=tool_name, model_name=model, operation=op,
                       duration_ms=int((time.monotonic() - start) * 1000))
         return result
+    except xmlrpc.client.Fault as e:
+        # Odoo commits the transaction in its service layer BEFORE serializing the
+        # response, so a void (None-returning) method that already succeeded still
+        # raises this marshalling Fault (allow_none=False). It can only occur
+        # post-commit, so treat it as a successful void return. A method that
+        # itself raised produces a different Fault (carrying its traceback), which
+        # does NOT match and falls through to error + re-raise below.
+        if "cannot marshal None" in str(e) or "allow_none" in str(e):
+            log_mcp_event("model_access", tool_name=tool_name, model_name=model, operation=op,
+                          duration_ms=int((time.monotonic() - start) * 1000))
+            return None
+        log_mcp_event("error", tool_name=tool_name, model_name=model, operation=op,
+                      duration_ms=int((time.monotonic() - start) * 1000),
+                      error_code="E500", error_message=str(e))
+        raise
     except Exception as e:
         log_mcp_event("error", tool_name=tool_name, model_name=model, operation=op,
                       duration_ms=int((time.monotonic() - start) * 1000),

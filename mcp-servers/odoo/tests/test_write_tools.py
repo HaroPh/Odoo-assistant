@@ -1,3 +1,7 @@
+import xmlrpc.client
+
+import pytest
+
 import server
 
 
@@ -373,3 +377,33 @@ def test_create_rfq_happy_builds_order_lines(monkeypatch):
         (0, 0, {"product_id": 60, "product_qty": 7}),
         (0, 0, {"product_id": 59, "product_qty": 5}),
     ]
+
+
+# ── gateway: None-return marshalling Fault ────────────────────────────────────
+
+def _patch_execute_raises(monkeypatch, fault):
+    """Make any Odoo call raise `fault` from execute_kw; skip auth via _uid."""
+    class FakeProxy:
+        def __init__(self, url):
+            pass
+
+        def execute_kw(self, *a, **k):
+            raise fault
+
+    monkeypatch.setattr(server.xmlrpc.client, "ServerProxy", FakeProxy)
+    monkeypatch.setattr(server, "_uid", 1)  # skip get_uid() authentication
+
+
+def test_gateway_marshal_none_fault_returns_none(monkeypatch):
+    # Odoo commits in the service layer before serializing the response, so a
+    # void (None-returning) method that succeeded still raises this Fault.
+    fault = xmlrpc.client.Fault(1, "cannot marshal None unless allow_none is enabled")
+    _patch_execute_raises(monkeypatch, fault)
+    assert server.odoo("res.partner", "search_read", [[]]) is None
+
+
+def test_gateway_other_fault_reraises(monkeypatch):
+    fault = xmlrpc.client.Fault(2, "AccessError: bạn không có quyền")
+    _patch_execute_raises(monkeypatch, fault)
+    with pytest.raises(xmlrpc.client.Fault):
+        server.odoo("res.partner", "search_read", [[]])
