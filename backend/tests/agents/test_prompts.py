@@ -28,3 +28,8 @@ def test_planner_prompt_advertises_post_invoice_disambiguators():
 def test_planner_prompt_advertises_create_quotation():
     assert "create_quotation" in WRITE_PLANNER_PROMPT
     assert "lines" in WRITE_PLANNER_PROMPT
+
+
+def test_planner_prompt_advertises_create_rfq():
+    assert "create_rfq" in WRITE_PLANNER_PROMPT
+    assert "supplier_name" in WRITE_PLANNER_PROMPT

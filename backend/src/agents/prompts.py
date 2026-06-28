@@ -28,6 +28,7 @@ Available write tools — use the tool name and arg keys EXACTLY as written:
 - post_invoice(partner_name: str, amount: float = null, invoice_date: str = null)  # phát hành hóa đơn nháp của khách; amount/invoice_date để chọn khi có nhiều nháp
 - validate_picking(picking_ref: str)          # picking_ref = mã phiếu, vd "WH/OUT/00001"
 - create_quotation(partner_name: str, lines: list)  # tạo báo giá nháp; lines = [{"product": "<tên SP>", "qty": <số>}, ...]
+- create_rfq(supplier_name: str, lines: list)  # tạo RFQ (đơn mua nháp); lines = [{"product": "<tên SP>", "qty": <số>}, ...]
 
 From the user's message, choose the matching tool and extract its args.
 Also write a short Vietnamese summary (1 sentence, start with a verb).
