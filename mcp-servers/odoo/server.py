@@ -676,6 +676,34 @@ def validate_picking(picking_ref: str) -> str:
     return f"Đã xác nhận phiếu {name}."
 
 
+def _resolve_partner(name, kind_label, hint):
+    """Resolve a partner name → unique row via the disambiguation pattern.
+    Lenient (no rank filter); returns (row, None) or (None, listing/not-found msg)."""
+    rows = odoo("res.partner", "search_read",
+                [[["name", "ilike", name]]],
+                {"fields": ["id", "name", "email"], "limit": 6})
+    return resolve_unique(
+        rows, kind_label,
+        describe=lambda r: f"{r['name']} — {r.get('email') or '—'}",
+        hint=hint)
+
+
+def _resolve_product(term, ok_field):
+    """Resolve a product name/code → unique row. `ok_field` ANDs a flag clause:
+    'sale_ok' (SO), 'purchase_ok' (PO), or 'is_storable' (inventory)."""
+    rows = odoo("product.product", "search_read",
+                [["|", ["name", "ilike", term],
+                      ["default_code", "ilike", term],
+                  [ok_field, "=", True]]],
+                {"fields": ["id", "name", "default_code", "list_price"],
+                 "limit": 6})
+    return resolve_unique(
+        rows, f"sản phẩm '{term}'",
+        describe=lambda r: (f"{r['name']} [{r.get('default_code') or '-'}] "
+                            f"— {r['list_price']:,.0f}đ"),
+        hint="Vui lòng nêu rõ tên sản phẩm.")
+
+
 @mcp.tool()
 def create_quotation(partner_name: str, lines: list) -> str:
     """Tạo báo giá nháp (sale.order) cho một khách hàng với các dòng sản phẩm.
@@ -689,30 +717,14 @@ def create_quotation(partner_name: str, lines: list) -> str:
     if not lines:
         return "Vui lòng cho biết sản phẩm và số lượng cần báo giá."
 
-    prows = odoo("res.partner", "search_read",
-                 [[["name", "ilike", partner_name]]],
-                 {"fields": ["id", "name", "email"], "limit": 6})
-    partner, msg = resolve_unique(
-        prows, "khách hàng",
-        describe=lambda r: f"{r['name']} — {r.get('email') or '—'}",
-        hint="Vui lòng nêu rõ tên khách hàng.")
+    partner, msg = _resolve_partner(partner_name, "khách hàng",
+                                    "Vui lòng nêu rõ tên khách hàng.")
     if msg:
         return msg
 
     order_line = []
     for line in lines:
-        term = line["product"]
-        rows = odoo("product.product", "search_read",
-                    [["|", ["name", "ilike", term],
-                          ["default_code", "ilike", term],
-                      ["sale_ok", "=", True]]],
-                    {"fields": ["id", "name", "default_code", "list_price"],
-                     "limit": 6})
-        prod, pmsg = resolve_unique(
-            rows, f"sản phẩm '{term}'",
-            describe=lambda r: (f"{r['name']} [{r.get('default_code') or '-'}] "
-                                f"— {r['list_price']:,.0f}đ"),
-            hint="Vui lòng nêu rõ tên sản phẩm.")
+        prod, pmsg = _resolve_product(line["product"], "sale_ok")
         if pmsg:
             return pmsg
         order_line.append((0, 0, {"product_id": prod["id"],
