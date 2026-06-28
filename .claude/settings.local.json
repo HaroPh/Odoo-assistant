@@ -3,7 +3,33 @@
     "allow": [
       "Bash(git init *)",
       "Bash(git add *)",
-      "Bash(grep -E \"\\\\.env$\")"
+      "Bash(grep -E \"\\\\.env$\")",
+      "Bash(.venv/Scripts/python.exe -m pip install -q \"langgraph-checkpoint-postgres\" \"psycopg[binary,pool]\" pytest pytest-asyncio)",
+      "Bash(.venv/Scripts/python.exe -c \"from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver; import psycopg, pytest, pytest_asyncio; print\\('all imports OK'\\)\")",
+      "Bash(uv pip *)",
+      "Bash(git commit -q -m 'deps: add langgraph-checkpoint-postgres, psycopg, pytest *)",
+      "Bash(.venv\\\\Scripts\\\\python.exe -c \"from backend.src.agents.state import ERPAgentState; from backend.src.agents.prompts import SYSTEM_PROMPT; print\\('OK'\\)\")",
+      "Bash(bash __TRACKED_VAR__/task-brief d:/Project/docs/superpowers/plans/2026-06-24-intent-routing-agent.md 5)",
+      "Bash(bash C:/Users/ADMIN/.claude/plugins/cache/claude-plugins-official/superpowers/6.0.3/skills/subagent-driven-development/scripts/review-package f572374 HEAD)",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(git push *)",
+      "Bash(.venv/Scripts/python.exe -m pytest mcp-servers/odoo/tests/test_confirm_sale_order.py -v)",
+      "Bash(git commit *)",
+      "Bash(.venv/Scripts/python.exe -m pytest backend/tests/agents/test_confirmation_gate.py -v)",
+      "Bash(.venv/Scripts/python.exe -m pytest backend/tests/agents/test_confirmation_gate.py -q)",
+      "Bash(.venv/Scripts/python.exe -m pytest backend/tests/agents/test_graph_build.py -v)",
+      "Bash(.venv/Scripts/python.exe -m pytest backend/tests mcp-servers/odoo/tests -q)",
+      "Bash(.venv/Scripts/python.exe -m pytest mcp-servers/odoo/tests/test_read_tools.py -q)",
+      "Bash(.venv/Scripts/python.exe -m pytest mcp-servers/odoo/tests/test_read_tools.py -k \"lots or products\" -q)",
+      "Bash(.venv/Scripts/python.exe -m pytest mcp-servers/odoo/tests/test_read_tools.py -k detail -q)",
+      "Bash(.venv/Scripts/python.exe -m pytest mcp-servers/odoo/tests/test_read_tools.py -k \"manufacturing or bom\" -q)",
+      "Read(//c/Users/ADMIN/.claude/plugins/cache/claude-plugins-official/superpowers/6.0.3/skills/subagent-driven-development/scripts/**)",
+      "Read(//c/Users/ADMIN/.claude/plugins/cache/claude-plugins-official/superpowers/6.0.3/skills/subagent-driven-development/**)",
+      "Bash(cd /d D:\\\\Project)",
+      "Bash(.venv/Scripts/python.exe -m pytest mcp-servers/odoo/tests/test_write_tools.py -v)",
+      "Bash(bash C:/Users/ADMIN/.claude/plugins/cache/claude-plugins-official/superpowers/6.0.3/skills/subagent-driven-development/scripts/review-package 7bbb5fb HEAD)",
+      "Bash(bash C:/Users/ADMIN/.claude/plugins/cache/claude-plugins-official/superpowers/6.0.3/skills/subagent-driven-development/scripts/task-brief docs/superpowers/plans/2026-06-26-t2-simple-write-tools.md 2)",
+      "Bash(.venv/Scripts/python.exe -m pytest mcp-servers/odoo/tests/test_write_tools.py -k invoice -v)"
     ]
   }
 }

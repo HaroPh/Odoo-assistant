@@ -624,7 +624,7 @@ def post_invoice(partner_name: str, amount: float | None = None,
     row, msg = resolve_unique(
         rows, "hóa đơn nháp",
         describe=lambda r: (f"{r['partner_id'][1] if r['partner_id'] else '?'} "
-                            f"— {r['amount_total']:,.0f}đ "
+                            f"— {(r.get('amount_total') or 0):,.0f}đ "
                             f"— {r.get('invoice_date') or '—'}"),
         hint="Vui lòng nêu rõ số tiền hoặc ngày.")
     if msg:

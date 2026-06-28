@@ -91,6 +91,7 @@ def test_post_invoice_filters_draft_and_partner(monkeypatch):
     domain = calls[0]["args"][0]
     assert ["state", "=", "draft"] in domain
     assert ["partner_id.name", "ilike", "Azure Interior"] in domain
+    assert ["move_type", "in", ["out_invoice", "in_invoice"]] in domain
 
 
 def test_post_invoice_multiple_drafts_lists_candidates(monkeypatch):

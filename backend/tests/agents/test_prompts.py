@@ -21,5 +21,5 @@ def test_planner_prompt_advertises_t2_contracts():
 
 
 def test_planner_prompt_advertises_post_invoice_disambiguators():
-    assert "amount" in WRITE_PLANNER_PROMPT
+    assert "amount: float" in WRITE_PLANNER_PROMPT
     assert "invoice_date" in WRITE_PLANNER_PROMPT
