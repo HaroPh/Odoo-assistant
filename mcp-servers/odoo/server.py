@@ -676,6 +676,55 @@ def validate_picking(picking_ref: str) -> str:
     return f"Đã xác nhận phiếu {name}."
 
 
+@mcp.tool()
+def create_quotation(partner_name: str, lines: list) -> str:
+    """Tạo báo giá nháp (sale.order) cho một khách hàng với các dòng sản phẩm.
+    Resolve tên khách + tên từng sản phẩm; nếu có gì không rõ thì DỪNG, không
+    tạo đơn dở. YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        partner_name: Tên khách hàng (tìm gần đúng).
+        lines: Danh sách dòng hàng, mỗi dòng {"product": "<tên SP>", "qty": <số>}.
+    """
+    if not lines:
+        return "Vui lòng cho biết sản phẩm và số lượng cần báo giá."
+
+    prows = odoo("res.partner", "search_read",
+                 [[["name", "ilike", partner_name]]],
+                 {"fields": ["id", "name", "email"], "limit": 6})
+    partner, msg = resolve_unique(
+        prows, "khách hàng",
+        describe=lambda r: f"{r['name']} — {r.get('email') or '—'}",
+        hint="Vui lòng nêu rõ tên khách hàng.")
+    if msg:
+        return msg
+
+    order_line = []
+    for line in lines:
+        term = line["product"]
+        rows = odoo("product.product", "search_read",
+                    [["|", ["name", "ilike", term],
+                          ["default_code", "ilike", term],
+                      ["sale_ok", "=", True]]],
+                    {"fields": ["id", "name", "default_code", "list_price"],
+                     "limit": 6})
+        prod, pmsg = resolve_unique(
+            rows, f"sản phẩm '{term}'",
+            describe=lambda r: (f"{r['name']} [{r.get('default_code') or '-'}] "
+                                f"— {r['list_price']:,.0f}đ"),
+            hint="Vui lòng nêu rõ tên sản phẩm.")
+        if pmsg:
+            return pmsg
+        order_line.append((0, 0, {"product_id": prod["id"],
+                                  "product_uom_qty": line["qty"]}))
+
+    sid = odoo("sale.order", "create",
+               [{"partner_id": partner["id"], "order_line": order_line}])
+    so = odoo("sale.order", "read", [[sid]], {"fields": ["name"]})
+    name = so[0]["name"] if so else "?"
+    return f"Đã tạo báo giá {name} cho {partner['name']} ({len(lines)} dòng)."
+
+
 # ─── READ TOOLS (T1 expansion) ────────────────────────────────────────────────
 
 @mcp.tool()

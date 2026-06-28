@@ -7,7 +7,7 @@ def patch_odoo(monkeypatch, by_model, confirm_capture=None):
     def fake_odoo(model, method, args, kwargs=None, tool_name=None):
         calls.append({"model": model, "method": method, "args": args})
         if confirm_capture is not None and method in (
-            "button_confirm", "action_post", "button_validate",
+            "button_confirm", "action_post", "button_validate", "create",
         ):
             confirm_capture.append((model, method, args))
             return True
@@ -241,3 +241,69 @@ def test_resolve_unique_many_lists_candidates_with_hint():
     assert "nhiều" in msg.lower()
     assert "Azure — 100đ" in msg and "Azure — 250đ" in msg
     assert "Nêu rõ số tiền." in msg
+
+
+# ── create_quotation ──────────────────────────────────────────────────────────
+
+def test_create_quotation_empty_lines_asks(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch, {}, confirm_capture=cap)
+    out = fn("create_quotation")("Azure", [])
+    assert "sản phẩm" in out.lower()
+    assert cap == []
+
+
+def test_create_quotation_partner_not_found(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch, {("res.partner", "search_read"): []},
+               confirm_capture=cap)
+    out = fn("create_quotation")("Nobody", [{"product": "bàn", "qty": 2}])
+    assert "không tìm thấy" in out.lower()
+    assert cap == []  # no create
+
+
+def test_create_quotation_product_ambiguous_aborts(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch, {
+        ("res.partner", "search_read"): [
+            {"id": 7, "name": "Azure Interior", "email": "a@x.com"}],
+        ("product.product", "search_read"): [
+            {"id": 1, "name": "Ghế họp A", "default_code": "C1", "list_price": 100.0},
+            {"id": 2, "name": "Ghế họp B", "default_code": "C2", "list_price": 120.0}],
+    }, confirm_capture=cap)
+    out = fn("create_quotation")("Azure", [{"product": "ghế họp", "qty": 5}])
+    assert "nhiều" in out.lower() and "ghế họp" in out.lower()
+    assert not any(c[1] == "create" for c in cap)  # nothing created
+
+
+def test_create_quotation_happy_builds_order_lines(monkeypatch):
+    cap = []
+    def fake_odoo(model, method, args, kwargs=None, tool_name=None):
+        if method == "create":
+            cap.append((model, method, args))
+            return 99
+        if model == "res.partner":
+            return [{"id": 7, "name": "Azure Interior", "email": "a@x.com"}]
+        if model == "product.product":
+            # domain = ["|", ["name","ilike",term], ["default_code","ilike",term], ["sale_ok","=",True]]
+            # the searched term is the value of the first leaf: args[0][1][2]
+            term = args[0][1][2]
+            pid = 11 if "bàn" in term else 12
+            return [{"id": pid, "name": f"SP {pid}", "default_code": "X",
+                     "list_price": 50.0}]
+        if model == "sale.order" and method == "read":
+            return [{"name": "S00021"}]
+        return []
+    monkeypatch.setattr(server, "odoo", fake_odoo)
+
+    out = fn("create_quotation")("Azure", [{"product": "bàn gỗ", "qty": 10},
+                                           {"product": "ghế", "qty": 5}])
+    assert "S00021" in out and "Azure Interior" in out and "2 dòng" in out
+    create_calls = [c for c in cap if c[1] == "create"]
+    assert len(create_calls) == 1
+    vals = create_calls[0][2][0]              # args[0] = the vals dict
+    assert vals["partner_id"] == 7
+    assert vals["order_line"] == [
+        (0, 0, {"product_id": 11, "product_uom_qty": 10}),
+        (0, 0, {"product_id": 12, "product_uom_qty": 5}),
+    ]
