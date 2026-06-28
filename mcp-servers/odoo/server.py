@@ -737,6 +737,39 @@ def create_quotation(partner_name: str, lines: list) -> str:
     return f"Đã tạo báo giá {name} cho {partner['name']} ({len(lines)} dòng)."
 
 
+@mcp.tool()
+def create_rfq(supplier_name: str, lines: list) -> str:
+    """Tạo RFQ — đơn mua nháp (purchase.order) cho một nhà cung cấp với các dòng
+    sản phẩm. Resolve tên NCC + tên từng sản phẩm; nếu có gì không rõ thì DỪNG,
+    không tạo đơn dở. YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        supplier_name: Tên nhà cung cấp (tìm gần đúng).
+        lines: Danh sách dòng hàng, mỗi dòng {"product": "<tên SP>", "qty": <số>}.
+    """
+    if not lines:
+        return "Vui lòng cho biết sản phẩm và số lượng cần đặt mua."
+
+    vendor, msg = _resolve_partner(supplier_name, "nhà cung cấp",
+                                   "Vui lòng nêu rõ tên nhà cung cấp.")
+    if msg:
+        return msg
+
+    order_line = []
+    for line in lines:
+        prod, pmsg = _resolve_product(line["product"], "purchase_ok")
+        if pmsg:
+            return pmsg
+        order_line.append((0, 0, {"product_id": prod["id"],
+                                  "product_qty": line["qty"]}))
+
+    pid = odoo("purchase.order", "create",
+               [{"partner_id": vendor["id"], "order_line": order_line}])
+    po = odoo("purchase.order", "read", [[pid]], {"fields": ["name"]})
+    name = po[0]["name"] if po else "?"
+    return f"Đã tạo RFQ {name} cho {vendor['name']} ({len(lines)} dòng)."
+
+
 # ─── READ TOOLS (T1 expansion) ────────────────────────────────────────────────
 
 @mcp.tool()

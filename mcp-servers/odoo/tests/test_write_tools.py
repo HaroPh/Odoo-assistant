@@ -307,3 +307,69 @@ def test_create_quotation_happy_builds_order_lines(monkeypatch):
         (0, 0, {"product_id": 11, "product_uom_qty": 10}),
         (0, 0, {"product_id": 12, "product_uom_qty": 5}),
     ]
+
+
+# ── create_rfq ────────────────────────────────────────────────────────────────
+
+def test_create_rfq_empty_lines_asks(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch, {}, confirm_capture=cap)
+    out = fn("create_rfq")("Gemini Furniture", [])
+    assert "sản phẩm" in out.lower()
+    assert cap == []
+
+
+def test_create_rfq_supplier_not_found(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch, {("res.partner", "search_read"): []},
+               confirm_capture=cap)
+    out = fn("create_rfq")("Nobody", [{"product": "Screw", "qty": 2}])
+    assert "không tìm thấy" in out.lower()
+    assert cap == []  # no create
+
+
+def test_create_rfq_product_ambiguous_aborts(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch, {
+        ("res.partner", "search_read"): [
+            {"id": 10, "name": "Gemini Furniture", "email": "g@x.com"}],
+        ("product.product", "search_read"): [
+            {"id": 1, "name": "Bolt A", "default_code": "B1", "list_price": 1.0},
+            {"id": 2, "name": "Bolt B", "default_code": "B2", "list_price": 1.2}],
+    }, confirm_capture=cap)
+    out = fn("create_rfq")("Gemini", [{"product": "bolt", "qty": 5}])
+    assert "nhiều" in out.lower() and "bolt" in out.lower()
+    assert not any(c[1] == "create" for c in cap)  # nothing created
+
+
+def test_create_rfq_happy_builds_order_lines(monkeypatch):
+    cap = []
+    def fake_odoo(model, method, args, kwargs=None, tool_name=None):
+        if method == "create":
+            cap.append((model, method, args))
+            return 88
+        if model == "res.partner":
+            return [{"id": 10, "name": "Gemini Furniture", "email": "g@x.com"}]
+        if model == "product.product":
+            # domain leaf: args[0][1][2] is the searched term
+            term = args[0][1][2]
+            pid = 60 if "screw" in term.lower() else 59
+            return [{"id": pid, "name": f"P {pid}", "default_code": "X",
+                     "list_price": 0.5}]
+        if model == "purchase.order" and method == "read":
+            return [{"name": "P00013"}]
+        return []
+    monkeypatch.setattr(server, "odoo", fake_odoo)
+
+    out = fn("create_rfq")("Gemini", [{"product": "Screw", "qty": 7},
+                                      {"product": "Bolt", "qty": 5}])
+    assert "P00013" in out and "Gemini Furniture" in out and "2 dòng" in out
+    create_calls = [c for c in cap if c[1] == "create"]
+    assert len(create_calls) == 1
+    assert create_calls[0][0] == "purchase.order"
+    vals = create_calls[0][2][0]              # args[0] = the vals dict
+    assert vals["partner_id"] == 10
+    assert vals["order_line"] == [
+        (0, 0, {"product_id": 60, "product_qty": 7}),
+        (0, 0, {"product_id": 59, "product_qty": 5}),
+    ]
