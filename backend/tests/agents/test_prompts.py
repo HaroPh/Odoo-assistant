@@ -18,3 +18,8 @@ def test_planner_prompt_advertises_t2_contracts():
     assert "validate_picking" in WRITE_PLANNER_PROMPT
     assert "partner_name" in WRITE_PLANNER_PROMPT
     assert "picking_ref" in WRITE_PLANNER_PROMPT
+
+
+def test_planner_prompt_advertises_post_invoice_disambiguators():
+    assert "amount" in WRITE_PLANNER_PROMPT
+    assert "invoice_date" in WRITE_PLANNER_PROMPT

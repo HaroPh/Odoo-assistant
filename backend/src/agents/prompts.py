@@ -25,7 +25,7 @@ WRITE_PLANNER_PROMPT = """You are an ERP assistant planning a write operation.
 Available write tools — use the tool name and arg keys EXACTLY as written:
 - confirm_sale_order(order_ref: str)          # order_ref = mã đơn bán, vd "S00012"
 - confirm_purchase_order(order_ref: str)      # order_ref = mã đơn mua, vd "P00003"
-- post_invoice(partner_name: str)             # partner_name = tên khách của hóa đơn nháp, vd "Azure Interior"
+- post_invoice(partner_name: str, amount: float = null, invoice_date: str = null)  # phát hành hóa đơn nháp của khách; amount/invoice_date để chọn khi có nhiều nháp
 - validate_picking(picking_ref: str)          # picking_ref = mã phiếu, vd "WH/OUT/00001"
 
 From the user's message, choose the matching tool and extract its args.
