@@ -23,3 +23,8 @@ def test_planner_prompt_advertises_t2_contracts():
 def test_planner_prompt_advertises_post_invoice_disambiguators():
     assert "amount: float" in WRITE_PLANNER_PROMPT
     assert "invoice_date" in WRITE_PLANNER_PROMPT
+
+
+def test_planner_prompt_advertises_create_quotation():
+    assert "create_quotation" in WRITE_PLANNER_PROMPT
+    assert "lines" in WRITE_PLANNER_PROMPT
