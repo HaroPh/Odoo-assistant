@@ -198,3 +198,28 @@ def test_validate_picking_wizard_fallback(monkeypatch):
     out = fn("validate_picking")("WH/OUT/0031")
     assert "cần thao tác bổ sung" in out.lower() or "bổ sung" in out.lower()
     assert call_order == ["button_validate"]
+
+
+# ── resolve_unique helper ─────────────────────────────────────────────────────
+
+def test_resolve_unique_empty_returns_not_found():
+    row, msg = server.resolve_unique([], "hóa đơn nháp", lambda r: r["x"])
+    assert row is None
+    assert "không tìm thấy" in msg.lower()
+
+
+def test_resolve_unique_single_returns_row():
+    only = {"id": 1, "x": "A"}
+    row, msg = server.resolve_unique([only], "hóa đơn nháp", lambda r: r["x"])
+    assert row is only
+    assert msg is None
+
+
+def test_resolve_unique_many_lists_candidates_with_hint():
+    rows = [{"x": "Azure — 100đ"}, {"x": "Azure — 250đ"}]
+    row, msg = server.resolve_unique(
+        rows, "hóa đơn nháp", lambda r: r["x"], hint="Nêu rõ số tiền.")
+    assert row is None
+    assert "nhiều" in msg.lower()
+    assert "Azure — 100đ" in msg and "Azure — 250đ" in msg
+    assert "Nêu rõ số tiền." in msg
