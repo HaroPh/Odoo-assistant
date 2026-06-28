@@ -81,17 +81,8 @@ def test_confirm_po_sent_calls_button_confirm(monkeypatch):
 # ── post_invoice ──────────────────────────────────────────────────────────────
 
 def test_post_invoice_no_draft(monkeypatch):
-    # Draft invoices have no name in Odoo, so we resolve by partner.
     patch_odoo(monkeypatch, {("account.move", "search_read"): []})
     assert "không tìm thấy" in fn("post_invoice")("Nobody").lower()
-
-
-def test_post_invoice_ambiguous(monkeypatch):
-    patch_odoo(monkeypatch, {("account.move", "search_read"): [
-        {"id": 1, "partner_id": [2, "Azure"], "amount_total": 1.0, "move_type": "out_invoice"},
-        {"id": 2, "partner_id": [2, "Azure"], "amount_total": 2.0, "move_type": "out_invoice"},
-    ]})
-    assert "nhiều" in fn("post_invoice")("Azure").lower()
 
 
 def test_post_invoice_filters_draft_and_partner(monkeypatch):
@@ -102,18 +93,44 @@ def test_post_invoice_filters_draft_and_partner(monkeypatch):
     assert ["partner_id.name", "ilike", "Azure Interior"] in domain
 
 
-def test_post_invoice_draft_posts_and_returns_number(monkeypatch):
+def test_post_invoice_multiple_drafts_lists_candidates(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch, {("account.move", "search_read"): [
+        {"id": 1, "partner_id": [2, "Azure Interior"], "amount_total": 100.0,
+         "invoice_date": "2026-06-27", "move_type": "out_invoice"},
+        {"id": 2, "partner_id": [2, "Azure Interior"], "amount_total": 250.0,
+         "invoice_date": "2026-06-26", "move_type": "out_invoice"},
+    ]}, confirm_capture=cap)
+    out = fn("post_invoice")("Azure")
+    assert "nhiều" in out.lower()
+    assert "100" in out and "250" in out          # both amounts listed
+    assert cap == []                               # nothing posted
+
+
+def test_post_invoice_amount_disambiguator_filters_and_posts(monkeypatch):
+    cap = []
+    calls = patch_odoo(monkeypatch, {
+        ("account.move", "search_read"): [
+            {"id": 1, "partner_id": [2, "Azure Interior"], "amount_total": 100.0,
+             "invoice_date": "2026-06-27", "move_type": "out_invoice"}],
+        ("account.move", "read"): [{"name": "INV/2026/00011"}],
+    }, confirm_capture=cap)
+    out = fn("post_invoice")("Azure", amount=100.0)
+    assert ["amount_total", "=", 100.0] in calls[0]["args"][0]
+    assert "đã phát hành" in out.lower() and "INV/2026/00011" in out
+    assert ("account.move", "action_post", [[1]]) in cap
+
+
+def test_post_invoice_single_draft_posts(monkeypatch):
     cap = []
     patch_odoo(monkeypatch, {
         ("account.move", "search_read"): [
-            {"id": 58, "partner_id": [15, "Azure Interior"],
-             "amount_total": 100.0, "move_type": "out_invoice"}],
-        ("account.move", "read"): [{"name": "INV/2026/00011"}],
+            {"id": 58, "partner_id": [15, "Azure Interior"], "amount_total": 100.0,
+             "invoice_date": "2026-06-27", "move_type": "out_invoice"}],
+        ("account.move", "read"): [{"name": "INV/2026/00012"}],
     }, confirm_capture=cap)
     out = fn("post_invoice")("Azure")
-    assert "đã phát hành" in out.lower()
-    assert "INV/2026/00011" in out
-    assert "Azure Interior" in out
+    assert "đã phát hành" in out.lower() and "INV/2026/00012" in out
     assert ("account.move", "action_post", [[58]]) in cap
 
 

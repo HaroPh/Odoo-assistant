@@ -596,32 +596,43 @@ def confirm_purchase_order(order_ref: str) -> str:
 
 
 @mcp.tool()
-def post_invoice(partner_name: str) -> str:
+def post_invoice(partner_name: str, amount: float | None = None,
+                 invoice_date: str | None = None) -> str:
     """Phát hành hóa đơn nháp (account.move draft → posted) của một khách hàng.
     Áp dụng cho cả hóa đơn bán và hóa đơn mua. Hóa đơn nháp CHƯA có số (số được
-    cấp khi phát hành), nên tra theo tên khách hàng/nhà cung cấp.
+    cấp khi phát hành), nên tra theo tên khách. Nếu khách có nhiều hóa đơn nháp,
+    truyền thêm amount hoặc invoice_date để chọn đúng cái.
     YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
 
     Args:
         partner_name: Tên khách hàng/nhà cung cấp của hóa đơn nháp (tìm gần đúng).
+        amount: Tổng tiền hóa đơn — dùng để phân biệt khi có nhiều nháp.
+        invoice_date: Ngày hóa đơn (YYYY-MM-DD) — dùng để phân biệt.
     """
-    rows = odoo("account.move", "search_read",
-                [[["move_type", "in", ["out_invoice", "in_invoice"]],
-                  ["state", "=", "draft"],
-                  ["partner_id.name", "ilike", partner_name]]],
-                {"fields": ["id", "partner_id", "amount_total", "move_type"],
-                 "limit": 2})
-    if not rows:
-        return f"Không tìm thấy hóa đơn nháp nào của '{partner_name}'."
-    if len(rows) > 1:
-        return (f"Có nhiều hóa đơn nháp của '{partner_name}'. "
-                f"Vui lòng nêu rõ hơn.")
+    domain = [["move_type", "in", ["out_invoice", "in_invoice"]],
+              ["state", "=", "draft"],
+              ["partner_id.name", "ilike", partner_name]]
+    if amount is not None:
+        domain.append(["amount_total", "=", amount])
+    if invoice_date:
+        domain.append(["invoice_date", "=", invoice_date])
 
-    inv = rows[0]
-    partner = inv["partner_id"][1] if inv["partner_id"] else partner_name
-    odoo("account.move", "action_post", [[inv["id"]]])
-    # Số hóa đơn chỉ được cấp sau khi phát hành — đọc lại để lấy.
-    posted = odoo("account.move", "read", [[inv["id"]]], {"fields": ["name"]})
+    rows = odoo("account.move", "search_read", [domain],
+                {"fields": ["id", "partner_id", "amount_total", "invoice_date",
+                            "move_type"], "limit": 6})
+
+    row, msg = resolve_unique(
+        rows, "hóa đơn nháp",
+        describe=lambda r: (f"{r['partner_id'][1] if r['partner_id'] else '?'} "
+                            f"— {r['amount_total']:,.0f}đ "
+                            f"— {r.get('invoice_date') or '—'}"),
+        hint="Vui lòng nêu rõ số tiền hoặc ngày.")
+    if msg:
+        return msg
+
+    partner = row["partner_id"][1] if row["partner_id"] else partner_name
+    odoo("account.move", "action_post", [[row["id"]]])
+    posted = odoo("account.move", "read", [[row["id"]]], {"fields": ["name"]})
     name = posted[0]["name"] if posted else "?"
     return f"Đã phát hành hóa đơn {name} cho {partner}."
 
