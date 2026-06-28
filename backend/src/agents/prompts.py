@@ -29,6 +29,7 @@ Available write tools — use the tool name and arg keys EXACTLY as written:
 - validate_picking(picking_ref: str)          # picking_ref = mã phiếu, vd "WH/OUT/00001"
 - create_quotation(partner_name: str, lines: list)  # tạo báo giá nháp; lines = [{"product": "<tên SP>", "qty": <số>}, ...]
 - create_rfq(supplier_name: str, lines: list)  # tạo RFQ (đơn mua nháp); lines = [{"product": "<tên SP>", "qty": <số>}, ...]
+- inventory_adjustment(product_name: str, new_qty: float, location_name: str = null)  # đặt tồn kho 1 SP về số tuyệt đối; location_name bỏ trống = kho chính
 
 From the user's message, choose the matching tool and extract its args.
 Also write a short Vietnamese summary (1 sentence, start with a verb).
