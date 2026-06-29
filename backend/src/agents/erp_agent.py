@@ -1,8 +1,11 @@
 # backend/src/agents/erp_agent.py
 import os
 import uuid
+import time
 
 from langchain_openai import ChatOpenAI
+from langchain_core.messages import RemoveMessage
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.types import Command
@@ -97,7 +100,7 @@ class ERPAgent:
                 Command(resume=verdict == CONFIRM), config=config
             )
         else:
-            result = await self.graph.ainvoke({"messages": messages}, config=config)
+            result = await self._invoke_fresh(messages, config)
 
         # A write planner that called interrupt() surfaces as "__interrupt__" with
         # no final AI message — return its confirmation question to the user.
@@ -106,6 +109,17 @@ class ERPAgent:
             return question
 
         return result["messages"][-1].content.strip()
+
+    async def _invoke_fresh(self, messages: list[dict], config: dict):
+        """Run a non-resume turn, overwriting the persisted message channel.
+
+        Open WebUI resends the full conversation every turn, so appending it to
+        the checkpointer (the add_messages default) duplicates history without
+        bound. Prepending RemoveMessage(REMOVE_ALL_MESSAGES) clears the channel
+        first, leaving state["messages"] == exactly the incoming history.
+        """
+        reset = [RemoveMessage(id=REMOVE_ALL_MESSAGES), *messages]
+        return await self.graph.ainvoke({"messages": reset}, config=config)
 
     async def aclose(self) -> None:
         if self._pool is not None:

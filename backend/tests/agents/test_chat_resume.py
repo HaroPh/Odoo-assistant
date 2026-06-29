@@ -8,8 +8,9 @@ import os
 import sys
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, RemoveMessage
 from langgraph.types import Command
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
@@ -113,3 +114,24 @@ async def test_parked_unclear_reasks_without_resuming():
 
     assert answer == QUESTION
     graph.ainvoke.assert_not_awaited()  # graph stays parked
+
+
+# ── Feature 2: non-resume turn overwrites persisted history (no accumulation) ──
+
+async def test_not_parked_overwrites_message_history():
+    snapshot = _FakeSnapshot(next_=())  # not parked
+    result = {"messages": [AIMessage(content="ans")]}
+    graph = _FakeGraph(snapshot, result)
+    agent = _agent_with(graph)
+
+    incoming = [{"role": "user", "content": "A"},
+                {"role": "assistant", "content": "ans-old"},
+                {"role": "user", "content": "B"}]
+    await agent.chat(incoming, thread_id="T1")
+
+    sent = graph.ainvoke.await_args.args[0]
+    assert isinstance(sent, dict)
+    msgs = sent["messages"]
+    assert isinstance(msgs[0], RemoveMessage)
+    assert msgs[0].id == REMOVE_ALL_MESSAGES
+    assert msgs[1:] == incoming
