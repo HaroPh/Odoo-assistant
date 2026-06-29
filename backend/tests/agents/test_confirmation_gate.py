@@ -103,6 +103,37 @@ async def test_planner_handles_missing_summary_key(monkeypatch):
     assert "create_sale_order" in interrupted_with["payload"]["question"]
 
 
+@pytest.mark.asyncio
+async def test_write_planner_payload_carries_expires_at(monkeypatch):
+    """Interrupt payload includes expires_at == now + CONFIRMATION_TTL_SECONDS."""
+    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setenv("CONFIRMATION_TTL_SECONDS", "300")
+
+    plan_json = json.dumps({"tool": "create_quotation", "args": {}, "summary": "x"})
+    llm = make_mock_llm(plan_json)
+
+    import backend.src.agents.nodes as nodes_mod
+    monkeypatch.setattr(nodes_mod.time, "time", lambda: 1000.0)
+
+    interrupted_with = {}
+
+    class _FakeInterrupt(Exception):
+        pass
+
+    def fake_interrupt(payload):
+        interrupted_with["payload"] = payload
+        raise _FakeInterrupt("interrupt called")
+
+    monkeypatch.setattr(nodes_mod, "_interrupt", fake_interrupt)
+
+    from backend.src.agents.nodes import make_erp_write_planner_node
+    node = make_erp_write_planner_node(llm)
+    with pytest.raises(_FakeInterrupt):
+        await node(_write_state())
+
+    assert interrupted_with["payload"]["expires_at"] == 1300.0
+
+
 # ── Executor (factory) ───────────────────────────────────────────────────────
 
 def _fake_tool(name, result="OK", raises=None):

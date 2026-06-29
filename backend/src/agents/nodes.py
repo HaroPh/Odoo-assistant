@@ -1,6 +1,7 @@
 # backend/src/agents/nodes.py
 import os
 import json
+import time
 import logging
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langchain.agents import create_agent as _create_agent
@@ -95,7 +96,12 @@ def make_erp_write_planner_node(llm):
 
         summary = plan.get("summary") or plan.get("tool") or "thao tác"
         question = WRITE_CONFIRM_PREFIX + f"**{summary}**\n\nXác nhận? (có / không)"
-        confirmed = _interrupt({"question": question, "action": plan})
+        ttl = int(os.environ.get("CONFIRMATION_TTL_SECONDS", "300"))
+        confirmed = _interrupt({
+            "question": question,
+            "action": plan,
+            "expires_at": time.time() + ttl,
+        })
         return {"pending_action": plan, "confirmed": confirmed}
 
     return erp_write_planner
