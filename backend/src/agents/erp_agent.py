@@ -43,6 +43,16 @@ def _pending_question(snapshot) -> str | None:
     return None
 
 
+def _pending_expiry(snapshot) -> float | None:
+    """Epoch-seconds expiry of the interrupt a parked thread waits on, or None."""
+    for task in getattr(snapshot, "tasks", ()) or ():
+        for it in getattr(task, "interrupts", ()) or ():
+            value = getattr(it, "value", None)
+            if isinstance(value, dict) and "expires_at" in value:
+                return value["expires_at"]
+    return None
+
+
 class ERPAgent:
     def __init__(self) -> None:
         self.graph = None
@@ -90,15 +100,22 @@ class ERPAgent:
         # the user's answer — classify it and resume instead of starting over.
         snapshot = await self.graph.aget_state(config)
         if getattr(snapshot, "next", None):
-            reply = messages[-1]["content"]
-            verdict = await classify_confirmation(reply, self._llm)
-            if verdict == UNCLEAR:
-                # Don't guess on an ambiguous reply: re-ask, leave thread parked.
-                question = _pending_question(snapshot)
-                return question or "Bạn xác nhận thực hiện thao tác này? (có / không)"
-            result = await self.graph.ainvoke(
-                Command(resume=verdict == CONFIRM), config=config
-            )
+            expires_at = _pending_expiry(snapshot)
+            if expires_at is not None and time.time() > expires_at:
+                # Stale confirmation: discard it (resume=False is a no-op write,
+                # result ignored) and process this turn as a fresh request.
+                await self.graph.ainvoke(Command(resume=False), config=config)
+                result = await self._invoke_fresh(messages, config)
+            else:
+                reply = messages[-1]["content"]
+                verdict = await classify_confirmation(reply, self._llm)
+                if verdict == UNCLEAR:
+                    # Don't guess on an ambiguous reply: re-ask, leave thread parked.
+                    question = _pending_question(snapshot)
+                    return question or "Bạn xác nhận thực hiện thao tác này? (có / không)"
+                result = await self.graph.ainvoke(
+                    Command(resume=verdict == CONFIRM), config=config
+                )
         else:
             result = await self._invoke_fresh(messages, config)
 
