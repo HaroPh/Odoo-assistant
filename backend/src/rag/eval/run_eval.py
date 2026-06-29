@@ -8,7 +8,8 @@ EVAL_SET = os.path.join(HERE, "eval_set.yaml")
 
 
 def evaluate(conn, k: int = 6) -> dict:
-    cases = yaml.safe_load(open(EVAL_SET, encoding="utf-8"))
+    with open(EVAL_SET, encoding="utf-8") as f:
+        cases = yaml.safe_load(f)
     hits, misses = 0, []
     for case in cases:
         res = retrieve(case["q"], k=k, conn=conn)

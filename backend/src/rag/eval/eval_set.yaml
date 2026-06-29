@@ -2,7 +2,7 @@
 # Each entry: q (question), expect_file (basename), expect_section (optional substring of section_path)
 
 # --- policy.docx (Chính sách hoàn hàng) ---
-- q: "khách được hoàn hàng trong bao nhiêu ngày?"
+- q: "tôi mua hàng cách đây hơn một tháng, giờ trả lại được không?"
   expect_file: "policy.docx"
   expect_section: "Mục 1"
 
@@ -55,15 +55,15 @@
   expect_file: "sop.docx"
   expect_section: "Bước 2"
 
-- q: "đối chiếu đơn mua trong hệ thống nào?"
+- q: "phần mềm nào dùng để so sánh số lượng hàng thực nhận với đơn đặt hàng?"
   expect_file: "sop.docx"
   expect_section: "Bước 2"
 
-- q: "QC kiểm tra bao nhiêu phần trăm hàng nhập kho?"
+- q: "bộ phận kiểm tra chất lượng lấy mẫu theo tỷ lệ nào?"
   expect_file: "sop.docx"
   expect_section: "Bước 3"
 
-- q: "hàng không đạt chất lượng xử lý trong bao lâu?"
+- q: "hàng bị lỗi phải giải quyết trong khoảng thời gian nào?"
   expect_file: "sop.docx"
   expect_section: "Bước 3"
 
@@ -72,7 +72,7 @@
   expect_section: "Bước 4"
 
 # --- sla.docx (Thỏa thuận mức dịch vụ nhà cung cấp) ---
-- q: "nhà cung cấp giao hàng trong mấy ngày?"
+- q: "bao lâu sau khi đặt thì nhà cung cấp phải giao xong?"
   expect_file: "sla.docx"
   expect_section: "Điều 3"
 
@@ -80,41 +80,41 @@
   expect_file: "sla.docx"
   expect_section: "Điều 3"
 
-- q: "phạt chậm giao hàng là bao nhiêu phần trăm mỗi ngày?"
+- q: "mỗi ngày giao trễ nhà cung cấp bị trừ bao nhiêu?"
   expect_file: "sla.docx"
   expect_section: "Điều 5"
 
-- q: "phạt chậm giao tối đa bao nhiêu phần trăm?"
+- q: "nếu nhà cung cấp giao trễ nhiều ngày thì khoản phạt bị giới hạn ở mức nào?"
   expect_file: "sla.docx"
   expect_section: "Điều 5"
 
-- q: "điều khoản thanh toán cho nhà cung cấp là bao nhiêu ngày?"
+- q: "bên mình phải trả tiền cho nhà cung cấp trong vòng mấy ngày kể từ khi nhận hàng?"
   expect_file: "sla.docx"
   expect_section: "Điều 6"
 
-- q: "chiết khấu thanh toán sớm là bao nhiêu phần trăm?"
+- q: "thanh toán trước hạn thì được giảm giá không?"
   expect_file: "sla.docx"
   expect_section: "Điều 6"
 
-- q: "tỷ lệ hàng lỗi tối đa được chấp nhận là bao nhiêu?"
+- q: "hàng nhà cung cấp giao bị hỏng tối đa mấy phần trăm thì còn chấp nhận được?"
   expect_file: "sla.docx"
   expect_section: "Điều 2"
 
 # --- bang_gia.xlsx (Bảng giá) ---
-- q: "đơn giá tủ lớn là bao nhiêu?"
+- q: "tủ lớn bán giá nhiêu?"
   expect_file: "bang_gia.xlsx"
 
 - q: "bàn làm việc giá bao nhiêu tiền?"
   expect_file: "bang_gia.xlsx"
 
-- q: "giá ghế văn phòng là bao nhiêu?"
+- q: "ghế văn phòng mua hết bao nhiêu?"
   expect_file: "bang_gia.xlsx"
 
 - q: "laptop 15 inch giá bao nhiêu trong bảng giá?"
   expect_file: "bang_gia.xlsx"
 
-- q: "giá màn hình máy tính là bao nhiêu?"
+- q: "màn hình máy tính mua thì tốn bao nhiêu?"
   expect_file: "bang_gia.xlsx"
 
-- q: "giá giấy A4 mỗi ram là bao nhiêu?"
+- q: "một ram giấy A4 giá mấy đồng?"
   expect_file: "bang_gia.xlsx"
