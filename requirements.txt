@@ -114,3 +114,8 @@ uuid-utils==0.15.0
 uvicorn==0.46.0
 xxhash==3.7.0
 zstandard==0.25.0
+pgvector==0.4.1
+pypdf==5.1.0
+python-docx==1.1.2
+openpyxl==3.1.5
+pyvi==0.1.1
