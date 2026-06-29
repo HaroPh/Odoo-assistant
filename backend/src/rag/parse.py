@@ -1,6 +1,7 @@
 import re
 
 from docx import Document
+import openpyxl
 import pypdf
 
 _HEADING_RE = re.compile(r"^\s*(Chương|Mục|Điều)\b|^\s*\d+(\.\d+)*[\.\)]?\s+\S")
@@ -41,3 +42,17 @@ def parse_pdf(path: str) -> list[dict]:
                            "heading_level": 2 if is_heading else None,
                            "page": pageno})
     return blocks
+
+
+def parse_xlsx(path: str) -> list[dict]:
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    sheets: list[dict] = []
+    for ws in wb.worksheets:
+        rows = [list(r) for r in ws.iter_rows(values_only=True)]
+        rows = [r for r in rows if any(c is not None for c in r)]
+        if not rows:
+            continue
+        header = [str(c) if c is not None else "" for c in rows[0]]
+        sheets.append({"sheet": ws.title, "columns": header, "rows": rows[1:]})
+    wb.close()
+    return sheets
