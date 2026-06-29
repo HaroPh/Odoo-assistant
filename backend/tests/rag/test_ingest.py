@@ -2,8 +2,6 @@ import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 import pytest
 
-FIX = os.path.join(os.path.dirname(__file__), "fixtures")
-
 
 @pytest.fixture
 def _mock_embed(monkeypatch):
@@ -57,3 +55,25 @@ def test_ts_vector_is_populated(clean_tables, _mock_embed, tmp_path):
     ingest_path(p, conn=clean_tables)
     nulls = clean_tables.execute("SELECT count(*) FROM rag_chunks WHERE ts_vector IS NULL").fetchone()[0]
     assert nulls == 0
+
+
+def test_ingest_rolls_back_doc_on_embed_failure(clean_tables, monkeypatch, tmp_path):
+    from backend.src.rag import ingest as ing
+    from backend.src.rag.embed import EmbeddingError
+
+    def _boom(texts):
+        raise EmbeddingError("ollama down")
+
+    monkeypatch.setattr(ing, "embed_texts", _boom)
+    p = str(tmp_path / "policy.docx")
+    from docx import Document
+    d = Document()
+    d.add_heading("Chính sách hoàn hàng", level=1)
+    d.add_paragraph("Khách hàng có thể hoàn hàng trong 30 ngày.")
+    d.save(p)
+
+    with pytest.raises(Exception):
+        ing.ingest_path(p, conn=clean_tables)
+    # no orphan doc row, no chunks
+    assert clean_tables.execute("SELECT count(*) FROM rag_documents").fetchone()[0] == 0
+    assert clean_tables.execute("SELECT count(*) FROM rag_chunks").fetchone()[0] == 0

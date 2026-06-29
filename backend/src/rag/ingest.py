@@ -6,7 +6,7 @@ from pyvi import ViTokenizer
 
 from . import db as _db
 from .config import RAG_SCHEMA
-from .embed import embed_texts
+from .embed import EmbeddingError, embed_texts
 from .parse import parse_docx, parse_pdf, parse_xlsx
 from .chunking import chunk_text_blocks, chunk_xlsx_sheets
 
@@ -53,28 +53,31 @@ def _ingest_file(path: str, conn) -> dict:
     ).fetchone()
     if existing and existing[0] == content_hash:
         return {"ingested": 0, "skipped": 1, "chunks": 0}
-    if existing:
-        conn.execute("DELETE FROM rag_documents WHERE doc_id = %s", (doc_id,))  # cascade
 
     chunks = _chunks_for(path, kind, doc_id)
     if not chunks:
         return {"ingested": 0, "skipped": 1, "chunks": 0}
 
-    conn.execute(
-        "INSERT INTO rag_documents (doc_id, source_file, content_hash) VALUES (%s, %s, %s)",
-        (doc_id, path, content_hash),
-    )
+    # Embed BEFORE any DB write — if Ollama is down no orphan rows are created
     vectors = embed_texts([c["chunk_text"] for c in chunks])
-    for c, vec in zip(chunks, vectors):
+
+    with conn.transaction():
+        if existing:
+            conn.execute("DELETE FROM rag_documents WHERE doc_id = %s", (doc_id,))  # cascade
         conn.execute(
-            "INSERT INTO rag_chunks (doc_id, source_file, doc_title, section_path, page, "
-            "sheet, row_range, columns, chunk_index, token_count, chunk_text, embedding, "
-            "ts_vector) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, "
-            "to_tsvector('simple', %s))",
-            (c["doc_id"], c["source_file"], c["doc_title"], c["section_path"], c["page"],
-             c["sheet"], c["row_range"], c["columns"], c["chunk_index"], c["token_count"],
-             c["chunk_text"], vec, segment_vi(c["chunk_text"])),
+            "INSERT INTO rag_documents (doc_id, source_file, content_hash) VALUES (%s, %s, %s)",
+            (doc_id, path, content_hash),
         )
+        for c, vec in zip(chunks, vectors):
+            conn.execute(
+                "INSERT INTO rag_chunks (doc_id, source_file, doc_title, section_path, page, "
+                "sheet, row_range, columns, chunk_index, token_count, chunk_text, embedding, "
+                "ts_vector) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, "
+                "to_tsvector('simple', %s))",
+                (c["doc_id"], c["source_file"], c["doc_title"], c["section_path"], c["page"],
+                 c["sheet"], c["row_range"], c["columns"], c["chunk_index"], c["token_count"],
+                 c["chunk_text"], vec, segment_vi(c["chunk_text"])),
+            )
     return {"ingested": 1, "skipped": 0, "chunks": len(chunks)}
 
 
