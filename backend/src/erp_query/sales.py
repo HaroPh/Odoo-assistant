@@ -6,10 +6,6 @@ from .gateway import default_gateway
 from .resolve import resolve_entity
 
 
-def _today() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-
 def _period_from(period):
     t = datetime.now(timezone.utc)
     if period == "month":
