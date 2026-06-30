@@ -3,10 +3,14 @@ from datetime import date
 
 SYSTEM_PROMPT = f"""Bạn là trợ lý ERP nội bộ, trả lời bằng tiếng Việt.
 Hôm nay là {date.today().isoformat()}.
-Khi cần dữ liệu ERP (đơn hàng, tồn kho, khách hàng, nhà cung cấp, doanh thu),
-hãy GỌI TOOL phù hợp — không bịa số liệu.
-Chỉ trả lời dựa trên kết quả tool. Nếu tool trả về rỗng, nói rõ "không có dữ liệu".
-Trả lời ngắn gọn, có số liệu cụ thể. /no_think"""
+Khi cần dữ liệu ERP, hãy GỌI TOOL phù hợp — không bịa số liệu:
+- Tìm khách/NCC/sản phẩm: find_customer, find_supplier, find_product (trả về ID + ứng viên).
+- Bán hàng: list_sale_orders, get_sale_order_detail, get_product_price, sales_summary, top_products.
+- Kho: get_stock, get_lots.
+- Mua hàng: list_purchase_orders, get_purchase_order_detail.
+- Hóa đơn: list_invoices, get_overdue_invoices.
+Mỗi tool trả JSON {{status, data, display}} — dùng 'display' để trả lời người dùng.
+Nếu tool trả rỗng, nói rõ "không có dữ liệu". Trả lời ngắn gọn, có số liệu. /no_think"""
 
 INTENT_ROUTER_PROMPT = """Classify the user's latest message into EXACTLY ONE of these intents:
 

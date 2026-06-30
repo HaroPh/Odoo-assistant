@@ -20,3 +20,9 @@ def test_build_graph_includes_mixed_node():
     llm = MagicMock()
     graph = build_graph(llm, tools=[], checkpointer=None)
     assert "mixed" in graph.get_graph().nodes
+
+
+def test_erp_read_uses_erp_query_tools():
+    llm = MagicMock()
+    graph = build_graph(llm, tools=[], checkpointer=None)
+    assert "erp_read" in graph.get_graph().nodes
