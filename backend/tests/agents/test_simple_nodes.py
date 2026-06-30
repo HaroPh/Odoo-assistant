@@ -16,12 +16,46 @@ def _state(text: str) -> ERPAgentState:
 
 
 @pytest.mark.asyncio
-async def test_rag_node_returns_stub():
-    from backend.src.agents.nodes import rag_node
-    result = await rag_node(_state("Quy trình nhập kho?"))
-    msgs = result["messages"]
-    assert len(msgs) == 1
-    assert "chưa khả dụng" in msgs[0].content.lower() or "phase 2" in msgs[0].content.lower()
+async def test_rag_node_synthesizes_answer(monkeypatch):
+    import backend.src.agents.nodes as nodes_mod
+    from backend.src.rag.types import Chunk, RetrievalResult
+    c = Chunk(chunk_id=1, doc_id="d", source_file="C:/docs/policy.docx", doc_title="P",
+              section_path="Chính sách hoàn hàng › Mục 1", page=1, sheet=None,
+              row_range=None, text="Hoàn hàng trong 30 ngày.", dense_score=0.7,
+              sparse_score=None, rrf_score=0.02, rank=0)
+    result = RetrievalResult(query="q", query_used="q", chunks=[c], top_score=0.02,
+                             total_candidates=1, method="hybrid-rrf")
+    captured = {}
+
+    def fake_retrieve(query, *a, **kw):
+        captured["query"] = query
+        return result
+
+    monkeypatch.setattr(nodes_mod, "retrieve", fake_retrieve)
+
+    from backend.src.agents.nodes import make_rag_node
+    node = make_rag_node(make_mock_llm("Khách được hoàn trong 30 ngày."))
+    out = await node(_state("khách hoàn hàng mấy ngày?"))
+    assert captured["query"] == "khách hoàn hàng mấy ngày?"
+    content = out["messages"][0].content
+    assert "Khách được hoàn trong 30 ngày." in content
+    assert "📄 Nguồn:" in content
+
+
+@pytest.mark.asyncio
+async def test_rag_node_safe_message_on_retrieve_error(monkeypatch):
+    import backend.src.agents.nodes as nodes_mod
+    from backend.src.agents.synthesis import SAFE_MSG
+
+    def boom(query, *a, **kw):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(nodes_mod, "retrieve", boom)
+
+    from backend.src.agents.nodes import make_rag_node
+    node = make_rag_node(make_mock_llm("unused"))
+    out = await node(_state("bất kỳ"))
+    assert out["messages"][0].content == SAFE_MSG
 
 
 @pytest.mark.asyncio

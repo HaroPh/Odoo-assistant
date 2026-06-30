@@ -1,5 +1,6 @@
 # backend/src/agents/nodes.py
 import os
+import asyncio
 import json
 import time
 import logging
@@ -9,6 +10,8 @@ from langgraph.types import interrupt as _interrupt
 
 from .state import ERPAgentState
 from .prompts import INTENT_ROUTER_PROMPT, SYSTEM_PROMPT, WRITE_PLANNER_PROMPT, WRITE_CONFIRM_PREFIX
+from ..rag.retrieve import retrieve
+from .synthesis import synthesize, SAFE_MSG
 
 logger = logging.getLogger(__name__)
 
@@ -50,15 +53,29 @@ def make_erp_read_node(llm, tools):
     return erp_read
 
 
-# ── rag (stub) ────────────────────────────────────────────────────────────────
+# ── rag (doc-only answering) ──────────────────────────────────────────────────
 
-async def rag_node(state: ERPAgentState) -> dict:
-    return {"messages": [AIMessage(
-        content=(
-            "Tính năng tìm kiếm tài liệu (RAG) chưa khả dụng trong phiên bản này. "
-            "Tính năng này sẽ ra mắt ở Phase 2."
-        )
-    )]}
+def make_rag_node(llm):
+    """Document Q&A: retrieve (sync, off the loop) → grounded synthesis + citations.
+
+    retrieve() is sync psycopg; asyncio.to_thread keeps the event loop free.
+    Any failure degrades to SAFE_MSG — the graph never crashes.
+    """
+    async def rag_node(state: ERPAgentState) -> dict:
+        last_human = next(
+            (m for m in reversed(state["messages"]) if m.type == "human"), None)
+        if last_human is None:
+            return {"messages": [AIMessage(content=SAFE_MSG)]}
+        query = last_human.content
+        try:
+            result = await asyncio.to_thread(retrieve, query)
+            answer = await synthesize(query, result, llm)
+        except Exception:
+            logger.exception("rag_node failed")
+            answer = SAFE_MSG
+        return {"messages": [AIMessage(content=answer)]}
+
+    return rag_node
 
 
 # ── respond_unknown ───────────────────────────────────────────────────────────
