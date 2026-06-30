@@ -13,11 +13,13 @@ INTENT_ROUTER_PROMPT = """Classify the user's latest message into EXACTLY ONE of
 erp_read   — query / read data from ERP: orders, inventory, customers, suppliers, revenue, top products
 erp_write  — create / update / delete data in ERP: create order, update stock, confirm purchase, etc.
 rag        — questions about documents, manuals, policies, procedures, internal knowledge base
+mixed      — needs BOTH an internal document/policy AND specific live ERP records together (e.g. "theo chính sách hoàn hàng, đơn của khách X có được hoàn không?")
 unknown    — does not clearly fit any of the above
 
 Rules:
 - Reply with ONLY the intent word, nothing else (no punctuation, no explanation).
 - When unsure between erp_read and erp_write, choose erp_read.
+- When the question needs a policy/document AND specific ERP records together, choose mixed.
 - Greetings / small talk → unknown."""
 
 WRITE_PLANNER_PROMPT = """You are an ERP assistant planning a write operation.

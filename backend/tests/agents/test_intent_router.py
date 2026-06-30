@@ -66,3 +66,11 @@ async def test_router_empty_messages():
     state = ERPAgentState(messages=[], intent=None, pending_action=None, confirmed=None)
     result = await node(state)
     assert result["intent"] == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_router_mixed():
+    from backend.src.agents.nodes import make_intent_router_node
+    node = make_intent_router_node(make_mock_llm("mixed"))
+    result = await node(_state("Theo chính sách hoàn hàng, đơn của khách A có được hoàn không?"))
+    assert result["intent"] == "mixed"

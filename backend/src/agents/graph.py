@@ -10,6 +10,7 @@ from .nodes import (
     make_rag_node,
     make_respond_unknown_node,
 )
+from .fusion import make_fusion_node
 
 
 def _route_by_intent(state: ERPAgentState) -> str:
@@ -31,6 +32,7 @@ def build_graph(llm, tools, checkpointer) -> object:
     g.add_node("erp_write_planner", make_erp_write_planner_node(llm))
     g.add_node("erp_write_executor", make_erp_write_executor_node(tools))
     g.add_node("rag", make_rag_node(llm))
+    g.add_node("mixed", make_fusion_node(llm, tools))
     g.add_node("respond_unknown", make_respond_unknown_node(llm))
 
     g.set_entry_point("intent_router")
@@ -39,6 +41,7 @@ def build_graph(llm, tools, checkpointer) -> object:
         "erp_read": "erp_read",
         "erp_write": "erp_write_planner",
         "rag": "rag",
+        "mixed": "mixed",
         "unknown": "respond_unknown",
     })
 
@@ -49,6 +52,7 @@ def build_graph(llm, tools, checkpointer) -> object:
     })
     g.add_edge("erp_write_executor", END)
     g.add_edge("rag", END)
+    g.add_edge("mixed", END)
     g.add_edge("respond_unknown", END)
 
     return g.compile(checkpointer=checkpointer)

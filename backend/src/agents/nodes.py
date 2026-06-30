@@ -15,7 +15,7 @@ from .synthesis import synthesize, SAFE_MSG
 
 logger = logging.getLogger(__name__)
 
-VALID_INTENTS = {"erp_read", "erp_write", "rag", "unknown"}
+VALID_INTENTS = {"erp_read", "erp_write", "rag", "mixed", "unknown"}
 
 
 def make_intent_router_node(llm):

@@ -14,3 +14,9 @@ def test_build_graph_compiles_with_write_executor_factory():
     assert graph is not None
     # erp_write_executor must be a registered node
     assert "erp_write_executor" in graph.get_graph().nodes
+
+
+def test_build_graph_includes_mixed_node():
+    llm = MagicMock()
+    graph = build_graph(llm, tools=[], checkpointer=None)
+    assert "mixed" in graph.get_graph().nodes
