@@ -28,3 +28,6 @@ Thumbs.db
 
 # Superpowers scratch (ledger is git-ignored scratch by design)
 .superpowers/
+
+# Internal planning docs (not project deliverables)
+docs/superpowers/

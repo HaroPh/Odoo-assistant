@@ -43,6 +43,11 @@ ODOO_METHOD_OPERATION_MAP = {
     # WRITE — Phase 3: cần confirmation
     "write": "write", "toggle_active": "write",
     "action_archive": "write", "message_post": "write",
+    "action_confirm": "write",
+    "button_confirm": "write",
+    "action_post": "write",
+    "button_validate": "write",
+    "action_apply_inventory": "write",
     # UNLINK — Phase 3: cần confirmation + cảnh báo
     "unlink": "unlink", "action_delete": "unlink",
 }
@@ -166,6 +171,21 @@ def odoo(model: str, method: str, args: list, kwargs: dict | None = None,
         log_mcp_event("model_access", tool_name=tool_name, model_name=model, operation=op,
                       duration_ms=int((time.monotonic() - start) * 1000))
         return result
+    except xmlrpc.client.Fault as e:
+        # Odoo commits the transaction in its service layer BEFORE serializing the
+        # response, so a void (None-returning) method that already succeeded still
+        # raises this marshalling Fault (allow_none=False). It can only occur
+        # post-commit, so treat it as a successful void return. A method that
+        # itself raised produces a different Fault (carrying its traceback), which
+        # does NOT match and falls through to error + re-raise below.
+        if "cannot marshal None" in str(e):
+            log_mcp_event("model_access", tool_name=tool_name, model_name=model, operation=op,
+                          duration_ms=int((time.monotonic() - start) * 1000))
+            return None
+        log_mcp_event("error", tool_name=tool_name, model_name=model, operation=op,
+                      duration_ms=int((time.monotonic() - start) * 1000),
+                      error_code="E500", error_message=str(e))
+        raise
     except Exception as e:
         log_mcp_event("error", tool_name=tool_name, model_name=model, operation=op,
                       duration_ms=int((time.monotonic() - start) * 1000),
@@ -177,6 +197,24 @@ def now_iso() -> str:
 
 def today_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+def resolve_unique(rows, kind_label, describe, hint=""):
+    """Pick a single record from candidate rows, or describe the choices.
+
+    Returns (row, None) when exactly one candidate matches; (None, message)
+    when none match or several do. `describe(row)` returns a short
+    distinguishing string used in the multi-candidate listing. Reusable by
+    any resolution tool.
+    """
+    if not rows:
+        return None, f"Không tìm thấy {kind_label} nào phù hợp."
+    if len(rows) == 1:
+        return rows[0], None
+    listing = "\n".join(f"  • {describe(r)}" for r in rows)
+    msg = f"Có nhiều {kind_label}:\n{listing}"
+    if hint:
+        msg += f"\n{hint}"
+    return None, msg
 
 # ─── TOOLS ───────────────────────────────────────────────────────────────────
 
@@ -516,6 +554,660 @@ def get_top_products(by: str = "quantity", period: str | None = None,
             f"  {i:2d}. {product:42s} | SL bán: {qty:,.0f} | Doanh thu: {revenue:,.0f}"
         )
     return "\n".join(lines)
+
+
+@mcp.tool()
+def confirm_sale_order(order_ref: str) -> str:
+    """
+    Xác nhận một đơn bán hàng (sale.order) đang ở trạng thái nháp.
+    draft/sent → sale. YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        order_ref: Mã đơn bán, ví dụ "S00012".
+    """
+    rows = odoo("sale.order", "search_read",
+                [[["name", "=", order_ref]]],
+                {"fields": ["id", "name", "state"], "limit": 2})
+    if not rows:
+        return f"Không tìm thấy đơn '{order_ref}'."
+    if len(rows) > 1:
+        return f"Có nhiều đơn tên '{order_ref}'. Vui lòng nêu rõ hơn."
+
+    order = rows[0]
+    name, state = order["name"], order["state"]
+    if state in ("sale", "done"):
+        return f"Đơn {name} đã được xác nhận rồi."
+    if state == "cancel":
+        return f"Đơn {name} đã bị hủy, không thể xác nhận."
+
+    odoo("sale.order", "action_confirm", [[order["id"]]])
+    return f"Đã xác nhận đơn {name}."
+
+
+@mcp.tool()
+def confirm_purchase_order(order_ref: str) -> str:
+    """Xác nhận đơn mua hàng (purchase.order) đang ở trạng thái nháp.
+    draft/sent → purchase. YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        order_ref: Mã đơn mua, ví dụ "P00003".
+    """
+    rows = odoo("purchase.order", "search_read",
+                [[["name", "=", order_ref]]],
+                {"fields": ["id", "name", "state"], "limit": 2})
+    if not rows:
+        return f"Không tìm thấy đơn mua '{order_ref}'."
+    if len(rows) > 1:
+        return f"Có nhiều đơn mua tên '{order_ref}'. Vui lòng nêu rõ hơn."
+
+    order = rows[0]
+    name, state = order["name"], order["state"]
+    if state in ("purchase", "done"):
+        return f"Đơn mua {name} đã được xác nhận rồi."
+    if state == "cancel":
+        return f"Đơn mua {name} đã bị hủy, không thể xác nhận."
+
+    odoo("purchase.order", "button_confirm", [[order["id"]]])
+    return f"Đã xác nhận đơn mua {name}."
+
+
+@mcp.tool()
+def post_invoice(partner_name: str, amount: float | None = None,
+                 invoice_date: str | None = None) -> str:
+    """Phát hành hóa đơn nháp (account.move draft → posted) của một khách hàng.
+    Áp dụng cho cả hóa đơn bán và hóa đơn mua. Hóa đơn nháp CHƯA có số (số được
+    cấp khi phát hành), nên tra theo tên khách. Nếu khách có nhiều hóa đơn nháp,
+    truyền thêm amount hoặc invoice_date để chọn đúng cái.
+    YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        partner_name: Tên khách hàng/nhà cung cấp của hóa đơn nháp (tìm gần đúng).
+        amount: Tổng tiền hóa đơn — dùng để phân biệt khi có nhiều nháp.
+        invoice_date: Ngày hóa đơn (YYYY-MM-DD) — dùng để phân biệt.
+    """
+    domain = [["move_type", "in", ["out_invoice", "in_invoice"]],
+              ["state", "=", "draft"],
+              ["partner_id.name", "ilike", partner_name]]
+    if amount is not None:
+        domain.append(["amount_total", "=", amount])
+    if invoice_date:
+        domain.append(["invoice_date", "=", invoice_date])
+
+    rows = odoo("account.move", "search_read", [domain],
+                {"fields": ["id", "partner_id", "amount_total", "invoice_date",
+                            "move_type"], "limit": 6})
+
+    row, msg = resolve_unique(
+        rows, "hóa đơn nháp",
+        describe=lambda r: (f"{r['partner_id'][1] if r['partner_id'] else '?'} "
+                            f"— {(r.get('amount_total') or 0):,.0f}đ "
+                            f"— {r.get('invoice_date') or '—'}"),
+        hint="Vui lòng nêu rõ số tiền hoặc ngày.")
+    if msg:
+        return msg
+
+    partner = row["partner_id"][1] if row["partner_id"] else partner_name
+    odoo("account.move", "action_post", [[row["id"]]])
+    posted = odoo("account.move", "read", [[row["id"]]], {"fields": ["name"]})
+    name = posted[0]["name"] if posted else "?"
+    return f"Đã phát hành hóa đơn {name} cho {partner}."
+
+
+@mcp.tool()
+def validate_picking(picking_ref: str) -> str:
+    """Xác nhận phiếu giao/nhận hàng (stock.picking) đã được reserve đủ.
+    Chỉ hoạt động khi state = 'assigned' — ở trạng thái này Odoo 19 đã tự set
+    số lượng thực = số lượng reserve trên mọi dòng, nên button_validate chạy
+    thẳng (không pop wizard). Nếu vẫn trả về dict (vd backorder một phần) thì
+    báo an toàn để xử lý trực tiếp trên Odoo.
+    YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        picking_ref: Mã phiếu, ví dụ "WH/OUT/00001" hoặc "WH/IN/00005".
+    """
+    rows = odoo("stock.picking", "search_read",
+                [[["name", "=", picking_ref]]],
+                {"fields": ["id", "name", "state"], "limit": 2})
+    if not rows:
+        return f"Không tìm thấy phiếu '{picking_ref}'."
+    if len(rows) > 1:
+        return f"Có nhiều phiếu tên '{picking_ref}'. Vui lòng nêu rõ hơn."
+
+    pick = rows[0]
+    name, state = pick["name"], pick["state"]
+    if state == "done":
+        return f"Phiếu {name} đã được xác nhận rồi."
+    if state == "cancel":
+        return f"Phiếu {name} đã bị hủy."
+    if state != "assigned":
+        return (f"Phiếu {name} chưa sẵn sàng (trạng thái: {state}). "
+                f"Cần reserve đủ hàng trước khi xác nhận.")
+
+    # Odoo 19: an 'assigned' picking already has done-qty = reserved on every
+    # move, so button_validate completes directly (no immediate-transfer wizard).
+    result = odoo("stock.picking", "button_validate", [[pick["id"]]])
+    if isinstance(result, dict):
+        return (f"Phiếu {name} cần thao tác bổ sung trên Odoo "
+                f"(wizard không hỗ trợ qua API). Vui lòng xử lý trực tiếp.")
+    return f"Đã xác nhận phiếu {name}."
+
+
+def _resolve_partner(name, kind_label, hint):
+    """Resolve a partner name → unique row via the disambiguation pattern.
+    Lenient (no rank filter); returns (row, None) or (None, listing/not-found msg)."""
+    rows = odoo("res.partner", "search_read",
+                [[["name", "ilike", name]]],
+                {"fields": ["id", "name", "email"], "limit": 6})
+    return resolve_unique(
+        rows, kind_label,
+        describe=lambda r: f"{r['name']} — {r.get('email') or '—'}",
+        hint=hint)
+
+
+def _resolve_product(term, ok_field):
+    """Resolve a product name/code → unique row. `ok_field` ANDs a flag clause:
+    'sale_ok' (SO), 'purchase_ok' (PO), or 'is_storable' (inventory)."""
+    rows = odoo("product.product", "search_read",
+                [["|", ["name", "ilike", term],
+                      ["default_code", "ilike", term],
+                  [ok_field, "=", True]]],
+                {"fields": ["id", "name", "default_code", "list_price"],
+                 "limit": 6})
+    return resolve_unique(
+        rows, f"sản phẩm '{term}'",
+        describe=lambda r: (f"{r['name']} [{r.get('default_code') or '-'}] "
+                            f"— {r['list_price']:,.0f}đ"),
+        hint="Vui lòng nêu rõ tên sản phẩm.")
+
+
+@mcp.tool()
+def create_quotation(partner_name: str, lines: list) -> str:
+    """Tạo báo giá nháp (sale.order) cho một khách hàng với các dòng sản phẩm.
+    Resolve tên khách + tên từng sản phẩm; nếu có gì không rõ thì DỪNG, không
+    tạo đơn dở. YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        partner_name: Tên khách hàng (tìm gần đúng).
+        lines: Danh sách dòng hàng, mỗi dòng {"product": "<tên SP>", "qty": <số>}.
+    """
+    if not lines:
+        return "Vui lòng cho biết sản phẩm và số lượng cần báo giá."
+
+    partner, msg = _resolve_partner(partner_name, "khách hàng",
+                                    "Vui lòng nêu rõ tên khách hàng.")
+    if msg:
+        return msg
+
+    order_line = []
+    for line in lines:
+        prod, pmsg = _resolve_product(line["product"], "sale_ok")
+        if pmsg:
+            return pmsg
+        order_line.append((0, 0, {"product_id": prod["id"],
+                                  "product_uom_qty": line["qty"]}))
+
+    sid = odoo("sale.order", "create",
+               [{"partner_id": partner["id"], "order_line": order_line}])
+    so = odoo("sale.order", "read", [[sid]], {"fields": ["name"]})
+    name = so[0]["name"] if so else "?"
+    return f"Đã tạo báo giá {name} cho {partner['name']} ({len(lines)} dòng)."
+
+
+@mcp.tool()
+def create_rfq(supplier_name: str, lines: list) -> str:
+    """Tạo RFQ — đơn mua nháp (purchase.order) cho một nhà cung cấp với các dòng
+    sản phẩm. Resolve tên NCC + tên từng sản phẩm; nếu có gì không rõ thì DỪNG,
+    không tạo đơn dở. YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        supplier_name: Tên nhà cung cấp (tìm gần đúng).
+        lines: Danh sách dòng hàng, mỗi dòng {"product": "<tên SP>", "qty": <số>}.
+    """
+    if not lines:
+        return "Vui lòng cho biết sản phẩm và số lượng cần đặt mua."
+
+    vendor, msg = _resolve_partner(supplier_name, "nhà cung cấp",
+                                   "Vui lòng nêu rõ tên nhà cung cấp.")
+    if msg:
+        return msg
+
+    order_line = []
+    for line in lines:
+        prod, pmsg = _resolve_product(line["product"], "purchase_ok")
+        if pmsg:
+            return pmsg
+        order_line.append((0, 0, {"product_id": prod["id"],
+                                  "product_qty": line["qty"]}))
+
+    pid = odoo("purchase.order", "create",
+               [{"partner_id": vendor["id"], "order_line": order_line}])
+    po = odoo("purchase.order", "read", [[pid]], {"fields": ["name"]})
+    name = po[0]["name"] if po else "?"
+    return f"Đã tạo RFQ {name} cho {vendor['name']} ({len(lines)} dòng)."
+
+
+@mcp.tool()
+def inventory_adjustment(product_name: str, new_qty: float,
+                         location_name: str | None = None) -> str:
+    """Điều chỉnh tồn kho thực tế của một sản phẩm về một SỐ TUYỆT ĐỐI tại một
+    vị trí kho (kiểm kê). new_qty là tồn kho KẾT QUẢ mong muốn, không phải lượng
+    tăng/giảm. Nếu không nêu vị trí thì dùng kho chính. YÊU CẦU XÁC NHẬN từ người
+    dùng trước khi gọi.
+
+    Args:
+        product_name: Tên sản phẩm lưu kho (tìm gần đúng).
+        new_qty: Tồn kho kết quả mong muốn (>= 0).
+        location_name: Tên vị trí kho (tùy chọn; bỏ trống = kho chính).
+    """
+    if new_qty < 0:
+        return "Số lượng tồn kho không hợp lệ (không âm)."
+
+    prod, msg = _resolve_product(product_name, "is_storable")
+    if msg:
+        return msg
+
+    if location_name:
+        lrows = odoo("stock.location", "search_read",
+                     [[["usage", "=", "internal"],
+                       ["complete_name", "ilike", location_name]]],
+                     {"fields": ["id", "complete_name"], "limit": 6})
+        loc, lmsg = resolve_unique(
+            lrows, "vị trí kho",
+            describe=lambda r: r["complete_name"],
+            hint="Vui lòng nêu rõ tên vị trí kho.")
+        if lmsg:
+            return lmsg
+    else:
+        wh = odoo("stock.warehouse", "search_read", [[]],
+                  {"fields": ["lot_stock_id"], "limit": 1})
+        if not wh:
+            return "Không tìm thấy kho mặc định."
+        loc = {"id": wh[0]["lot_stock_id"][0],
+               "complete_name": wh[0]["lot_stock_id"][1]}
+
+    quants = odoo("stock.quant", "search_read",
+                  [[["product_id", "=", prod["id"]],
+                    ["location_id", "=", loc["id"]]]],
+                  {"fields": ["id", "quantity"], "limit": 1})
+    if quants:
+        qid = quants[0]["id"]
+        old = quants[0]["quantity"]
+        odoo("stock.quant", "write", [[qid], {"inventory_quantity": new_qty}])
+    else:
+        old = 0.0
+        qid = odoo("stock.quant", "create",
+                   [{"product_id": prod["id"], "location_id": loc["id"],
+                     "inventory_quantity": new_qty}])
+
+    res = odoo("stock.quant", "action_apply_inventory", [[qid]])
+    if isinstance(res, dict):
+        return (f"Tồn kho {prod['name']} cần xử lý xung đột kiểm kê trên Odoo "
+                f"(sản phẩm theo lô/sê-ri). Vui lòng xử lý trực tiếp.")
+
+    q = odoo("stock.quant", "read", [[qid]], {"fields": ["quantity"]})
+    now = q[0]["quantity"] if q else new_qty
+    return (f"Đã điều chỉnh tồn kho {prod['name']} tại {loc['complete_name']}: "
+            f"{old:g} → {now:g}.")
+
+
+# ─── READ TOOLS (T1 expansion) ────────────────────────────────────────────────
+
+@mcp.tool()
+def get_customer_invoices(partner_name: str | None = None,
+                          payment_state: str | None = None,
+                          limit: int = 50) -> str:
+    """Hóa đơn khách hàng (account.move, out_invoice đã phát hành).
+
+    Args:
+        partner_name: Lọc theo tên khách (tìm gần đúng).
+        payment_state: not_paid | in_payment | partial | paid | reversed.
+        limit: Số dòng tối đa.
+    """
+    domain = [["move_type", "=", "out_invoice"], ["state", "=", "posted"]]
+    if partner_name:
+        domain.append(["partner_id.name", "ilike", partner_name])
+    if payment_state:
+        domain.append(["payment_state", "=", payment_state])
+    rows = odoo("account.move", "search_read", [domain], {
+        "fields": ["name", "partner_id", "invoice_date", "invoice_date_due",
+                   "amount_total", "amount_residual", "payment_state"],
+        "limit": limit, "order": "invoice_date desc",
+    })
+    if not rows:
+        return "Không có hóa đơn khách hàng nào phù hợp."
+    lines = [f"{len(rows)} hóa đơn khách hàng:\n"]
+    for r in rows:
+        partner = r["partner_id"][1] if r["partner_id"] else "N/A"
+        lines.append(
+            f"  {r['name']} | {partner} | Ngày: {r.get('invoice_date') or 'N/A'} "
+            f"| Tổng: {r['amount_total']:,.0f} | Còn nợ: {r['amount_residual']:,.0f} "
+            f"| TT: {r['payment_state']}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_vendor_bills(vendor_name: str | None = None,
+                     payment_state: str | None = None,
+                     limit: int = 50) -> str:
+    """Hóa đơn nhà cung cấp (account.move, in_invoice đã phát hành).
+
+    Args:
+        vendor_name: Lọc theo tên nhà cung cấp (tìm gần đúng).
+        payment_state: not_paid | in_payment | partial | paid | reversed.
+        limit: Số dòng tối đa.
+    """
+    domain = [["move_type", "=", "in_invoice"], ["state", "=", "posted"]]
+    if vendor_name:
+        domain.append(["partner_id.name", "ilike", vendor_name])
+    if payment_state:
+        domain.append(["payment_state", "=", payment_state])
+    rows = odoo("account.move", "search_read", [domain], {
+        "fields": ["name", "partner_id", "invoice_date", "invoice_date_due",
+                   "amount_total", "amount_residual", "payment_state"],
+        "limit": limit, "order": "invoice_date desc",
+    })
+    if not rows:
+        return "Không có hóa đơn nhà cung cấp nào phù hợp."
+    lines = [f"{len(rows)} hóa đơn nhà cung cấp:\n"]
+    for r in rows:
+        partner = r["partner_id"][1] if r["partner_id"] else "N/A"
+        lines.append(
+            f"  {r['name']} | {partner} | Ngày: {r.get('invoice_date') or 'N/A'} "
+            f"| Tổng: {r['amount_total']:,.0f} | Còn nợ: {r['amount_residual']:,.0f} "
+            f"| TT: {r['payment_state']}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_overdue_invoices(limit: int = 50) -> str:
+    """Hóa đơn khách hàng quá hạn (chưa trả hết, đến hạn đã qua)."""
+    today = today_iso()
+    domain = [
+        ["move_type", "=", "out_invoice"], ["state", "=", "posted"],
+        ["payment_state", "in", ["not_paid", "partial"]],
+        ["invoice_date_due", "<", today],
+    ]
+    rows = odoo("account.move", "search_read", [domain], {
+        "fields": ["name", "partner_id", "invoice_date_due",
+                   "amount_total", "amount_residual"],
+        "limit": limit, "order": "invoice_date_due asc",
+    })
+    if not rows:
+        return "Không có hóa đơn nào quá hạn."
+    lines = [f"Ngày hiện tại: {today} — {len(rows)} hóa đơn quá hạn:\n"]
+    for r in rows:
+        partner = r["partner_id"][1] if r["partner_id"] else "N/A"
+        lines.append(
+            f"  {r['name']} | {partner} | Đến hạn: {r.get('invoice_date_due') or 'N/A'} "
+            f"| Còn nợ: {r['amount_residual']:,.0f} / {r['amount_total']:,.0f}")
+    return "\n".join(lines)
+
+
+def _format_pickings(rows, title: str) -> str:
+    if not rows:
+        return f"Không có {title} nào phù hợp."
+    lines = [f"{len(rows)} {title}:\n"]
+    for r in rows:
+        partner = r["partner_id"][1] if r.get("partner_id") else "N/A"
+        sched = (r.get("scheduled_date") or "N/A")[:16]
+        lines.append(
+            f"  {r['name']} | {partner} | Dự kiến: {sched} "
+            f"| Trạng thái: {r['state']} | Nguồn: {r.get('origin') or '-'}")
+    return "\n".join(lines)
+
+
+_PICKING_FIELDS = ["name", "partner_id", "scheduled_date", "state", "origin"]
+
+
+@mcp.tool()
+def get_deliveries(state: str | None = None, partner_name: str | None = None,
+                   limit: int = 50) -> str:
+    """Phiếu giao hàng (stock.picking, outgoing).
+
+    Args:
+        state: draft|waiting|confirmed|assigned|done|cancel (bỏ trống = tất cả).
+        partner_name: Lọc theo tên khách (tìm gần đúng).
+        limit: Số dòng tối đa.
+    """
+    domain = [["picking_type_code", "=", "outgoing"]]
+    if state:
+        domain.append(["state", "=", state])
+    if partner_name:
+        domain.append(["partner_id.name", "ilike", partner_name])
+    rows = odoo("stock.picking", "search_read", [domain],
+                {"fields": _PICKING_FIELDS, "limit": limit,
+                 "order": "scheduled_date desc"})
+    return _format_pickings(rows, "phiếu giao hàng")
+
+
+@mcp.tool()
+def get_receipts(state: str | None = None, limit: int = 50) -> str:
+    """Phiếu nhận hàng (stock.picking, incoming).
+
+    Args:
+        state: draft|waiting|confirmed|assigned|done|cancel (bỏ trống = tất cả).
+        limit: Số dòng tối đa.
+    """
+    domain = [["picking_type_code", "=", "incoming"]]
+    if state:
+        domain.append(["state", "=", state])
+    rows = odoo("stock.picking", "search_read", [domain],
+                {"fields": _PICKING_FIELDS, "limit": limit,
+                 "order": "scheduled_date desc"})
+    return _format_pickings(rows, "phiếu nhận hàng")
+
+
+@mcp.tool()
+def get_internal_transfers(state: str | None = None, limit: int = 50) -> str:
+    """Phiếu điều chuyển nội bộ (stock.picking, internal).
+
+    Args:
+        state: draft|waiting|confirmed|assigned|done|cancel (bỏ trống = tất cả).
+        limit: Số dòng tối đa.
+    """
+    domain = [["picking_type_code", "=", "internal"]]
+    if state:
+        domain.append(["state", "=", state])
+    rows = odoo("stock.picking", "search_read", [domain],
+                {"fields": _PICKING_FIELDS, "limit": limit,
+                 "order": "scheduled_date desc"})
+    return _format_pickings(rows, "phiếu điều chuyển nội bộ")
+
+
+@mcp.tool()
+def search_lots(product_name: str | None = None, limit: int = 50) -> str:
+    """Tra cứu Lô / Số sê-ri (stock.lot) và tồn hiện tại.
+
+    Args:
+        product_name: Lọc theo tên sản phẩm (tìm gần đúng).
+        limit: Số dòng tối đa.
+    """
+    domain: list = []
+    if product_name:
+        domain.append(["product_id.name", "ilike", product_name])
+    rows = odoo("stock.lot", "search_read", [domain],
+                {"fields": ["name", "product_id", "product_qty"],
+                 "limit": limit, "order": "product_id asc"})
+    if not rows:
+        return "Không tìm thấy lô/sê-ri nào phù hợp."
+    lines = [f"{len(rows)} lô/sê-ri:\n"]
+    for r in rows:
+        product = r["product_id"][1] if r.get("product_id") else "N/A"
+        lines.append(f"  {r['name']:20s} | SP: {product:35s} | Tồn: {r['product_qty']:.1f}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def search_products(name: str | None = None, limit: int = 50) -> str:
+    """Tra cứu sản phẩm (product.product): giá bán, giá vốn, tồn kho.
+
+    Args:
+        name: Tìm theo tên hoặc mã nội bộ (tìm gần đúng).
+        limit: Số dòng tối đa.
+    """
+    domain: list = []
+    if name:
+        domain = ["|", ["name", "ilike", name], ["default_code", "ilike", name]]
+    rows = odoo("product.product", "search_read", [domain],
+                {"fields": ["name", "default_code", "list_price",
+                            "standard_price", "qty_available", "uom_id"],
+                 "limit": limit, "order": "name asc"})
+    if not rows:
+        return "Không tìm thấy sản phẩm nào phù hợp."
+    lines = [f"{len(rows)} sản phẩm:\n"]
+    for r in rows:
+        uom = r["uom_id"][1] if r.get("uom_id") else ""
+        lines.append(
+            f"  [{r.get('default_code') or '-'}] {r['name']:35s} "
+            f"| Giá bán: {r['list_price']:,.0f} | Giá vốn: {r['standard_price']:,.0f} "
+            f"| Tồn: {r['qty_available']:.1f} {uom}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_sale_order_detail(order_ref: str) -> str:
+    """Chi tiết dòng sản phẩm của một đơn bán (sale.order).
+
+    Args:
+        order_ref: Mã đơn bán, ví dụ "S00012".
+    """
+    orders = odoo("sale.order", "search_read", [[["name", "=", order_ref]]],
+                  {"fields": ["id", "name", "partner_id", "amount_total"], "limit": 2})
+    if not orders:
+        return f"Không tìm thấy đơn '{order_ref}'."
+    if len(orders) > 1:
+        return f"Có nhiều đơn tên '{order_ref}'. Vui lòng nêu rõ hơn."
+    o = orders[0]
+    rows = odoo("sale.order.line", "search_read", [[["order_id", "=", o["id"]]]],
+                {"fields": ["product_id", "product_uom_qty", "price_unit",
+                            "price_subtotal"], "order": "id asc"})
+    partner = o["partner_id"][1] if o["partner_id"] else "N/A"
+    out = [f"Đơn {o['name']} | Khách: {partner} | Tổng: {o['amount_total']:,.0f}\n"]
+    if not rows:
+        out.append("  (không có dòng sản phẩm)")
+    for ln in rows:
+        product = ln["product_id"][1] if ln.get("product_id") else "N/A"
+        out.append(
+            f"  {product:35s} | SL: {ln['product_uom_qty']:.1f} "
+            f"| Đơn giá: {ln['price_unit']:,.0f} | Thành tiền: {ln['price_subtotal']:,.0f}")
+    return "\n".join(out)
+
+
+@mcp.tool()
+def get_purchase_order_detail(order_ref: str) -> str:
+    """Chi tiết dòng sản phẩm của một đơn mua (purchase.order).
+
+    Args:
+        order_ref: Mã đơn mua, ví dụ "P00003".
+    """
+    orders = odoo("purchase.order", "search_read", [[["name", "=", order_ref]]],
+                  {"fields": ["id", "name", "partner_id", "amount_total"], "limit": 2})
+    if not orders:
+        return f"Không tìm thấy đơn '{order_ref}'."
+    if len(orders) > 1:
+        return f"Có nhiều đơn tên '{order_ref}'. Vui lòng nêu rõ hơn."
+    o = orders[0]
+    rows = odoo("purchase.order.line", "search_read", [[["order_id", "=", o["id"]]]],
+                {"fields": ["product_id", "product_qty", "price_unit",
+                            "price_subtotal"], "order": "id asc"})
+    partner = o["partner_id"][1] if o["partner_id"] else "N/A"
+    out = [f"Đơn {o['name']} | NCC: {partner} | Tổng: {o['amount_total']:,.0f}\n"]
+    if not rows:
+        out.append("  (không có dòng sản phẩm)")
+    for ln in rows:
+        product = ln["product_id"][1] if ln.get("product_id") else "N/A"
+        out.append(
+            f"  {product:35s} | SL: {ln['product_qty']:.1f} "
+            f"| Đơn giá: {ln['price_unit']:,.0f} | Thành tiền: {ln['price_subtotal']:,.0f}")
+    return "\n".join(out)
+
+
+@mcp.tool()
+def search_leads(type: str | None = None, salesperson: str | None = None,
+                 limit: int = 50) -> str:
+    """Tra cứu Lead / Cơ hội (crm.lead).
+
+    Args:
+        type: "lead" hoặc "opportunity" (bỏ trống = cả hai).
+        salesperson: Lọc theo tên nhân viên phụ trách (tìm gần đúng).
+        limit: Số dòng tối đa.
+    """
+    domain: list = []
+    if type:
+        domain.append(["type", "=", type])
+    if salesperson:
+        domain.append(["user_id.name", "ilike", salesperson])
+    rows = odoo("crm.lead", "search_read", [domain], {
+        "fields": ["name", "contact_name", "email_from", "stage_id",
+                   "expected_revenue", "probability", "user_id", "type"],
+        "limit": limit, "order": "expected_revenue desc",
+    })
+    if not rows:
+        return "Không tìm thấy lead/cơ hội nào phù hợp."
+    lines = [f"{len(rows)} lead/cơ hội:\n"]
+    for r in rows:
+        stage = r["stage_id"][1] if r.get("stage_id") else "N/A"
+        sp = r["user_id"][1] if r.get("user_id") else "N/A"
+        lines.append(
+            f"  {r['name']} | LH: {r.get('contact_name') or '-'} | GĐ: {stage} "
+            f"| Dự kiến: {r['expected_revenue']:,.0f} ({r['probability']:.0f}%) | NV: {sp}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_manufacturing_orders(state: str | None = None, limit: int = 50) -> str:
+    """Lệnh sản xuất (mrp.production).
+
+    Args:
+        state: draft|confirmed|progress|to_close|done|cancel (bỏ trống = tất cả).
+        limit: Số dòng tối đa.
+    """
+    domain: list = []
+    if state:
+        domain.append(["state", "=", state])
+    rows = odoo("mrp.production", "search_read", [domain], {
+        "fields": ["name", "product_id", "product_qty", "state", "date_start"],
+        "limit": limit, "order": "date_start desc",
+    })
+    if not rows:
+        return "Không có lệnh sản xuất nào phù hợp."
+    lines = [f"{len(rows)} lệnh sản xuất:\n"]
+    for r in rows:
+        product = r["product_id"][1] if r.get("product_id") else "N/A"
+        start = (r.get("date_start") or "N/A")[:16]
+        lines.append(
+            f"  {r['name']} | SP: {product:30s} | SL: {r['product_qty']:.1f} "
+            f"| Trạng thái: {r['state']} | Bắt đầu: {start}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_bom(product_name: str) -> str:
+    """Định mức nguyên vật liệu (BOM) của một sản phẩm.
+
+    Args:
+        product_name: Tên sản phẩm cần xem BOM (tìm gần đúng).
+    """
+    boms = odoo("mrp.bom", "search_read",
+                [[["product_tmpl_id.name", "ilike", product_name]]],
+                {"fields": ["id", "code", "product_tmpl_id", "product_qty"], "limit": 5})
+    if not boms:
+        return f"Không tìm thấy BOM cho '{product_name}'."
+    if len(boms) > 1:
+        names = ", ".join((b["product_tmpl_id"][1] if b["product_tmpl_id"] else "?")
+                          for b in boms)
+        return f"Có nhiều BOM khớp '{product_name}': {names}. Vui lòng nêu rõ hơn."
+    b = boms[0]
+    comps = odoo("mrp.bom.line", "search_read", [[["bom_id", "=", b["id"]]]],
+                 {"fields": ["product_id", "product_qty"], "order": "id asc"})
+    product = b["product_tmpl_id"][1] if b["product_tmpl_id"] else "N/A"
+    out = [f"BOM: {product} (tạo {b['product_qty']:.0f} đơn vị)\n  Thành phần:"]
+    if not comps:
+        out.append("    (không có thành phần)")
+    for c in comps:
+        cp = c["product_id"][1] if c.get("product_id") else "N/A"
+        out.append(f"    - {cp:35s} x {c['product_qty']:.2f}")
+    return "\n".join(out)
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────

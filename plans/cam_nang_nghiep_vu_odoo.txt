@@ -1,0 +1,56 @@
+Dưới đây là phần giải thích chi tiết hơn về cách Odoo vận hành các quy trình nghiệp vụ cơ bản, từ lúc phát sinh nhu cầu đến khi hoàn tất giao dịch tài chính:
+
+**1. Quản lý Khách hàng (CRM) và Bán hàng (Sales)**
+
+* **Chăm sóc Khách hàng tiềm năng (Leads):** Các luồng thông tin khách hàng từ web, email, điện thoại được gom chung thành Lead. Odoo hỗ trợ chấm điểm tự động (Predictive Lead Scoring) để đánh giá khả năng chốt sale và tự động phân bổ Lead cho nhân viên theo các quy tắc định kỳ (ví dụ: chia đều mỗi ngày/tuần).
+
+
+* **Chuyển đổi và Báo giá:** Khi Lead được xác nhận là có nhu cầu thực sự, nó sẽ được chuyển đổi thành Cơ hội (Opportunity). Từ đây, nhân viên sales tạo Báo giá (Quotation). Nếu khách hàng đồng ý, Báo giá được "Xác nhận" và chuyển thành Đơn bán hàng (Sale Order). Thao tác xác nhận này lập tức gửi một yêu cầu (Delivery Order) sang kho để chuẩn bị soạn hàng.
+
+
+
+**2. Quản lý Mua hàng (Purchase)**
+
+* **Yêu cầu Báo giá (RFQ):** Khi tồn kho dưới mức tối thiểu hoặc có yêu cầu từ sản xuất, nhân viên tạo RFQ gửi tới các nhà cung cấp.
+
+
+* **So sánh và Đặt hàng:** Nhân viên có thể so sánh giá, số lượng mua tối thiểu và thời gian giao hàng (Lead time) giữa nhiều nhà cung cấp. Sau khi chọn được phương án tốt nhất, RFQ được xác nhận thành Đơn mua hàng (Purchase Order). Tương tự quy trình bán hàng, việc này sẽ tạo ra một phiếu Nhận hàng dự kiến (Receipt) tại kho. Đơn mua hàng có thể được hệ thống khóa lại (Lock Confirmed Orders) để tránh việc chỉnh sửa sau khi đã chốt với đối tác.
+
+
+
+**3. Quản lý Kho vận (Inventory)**
+
+* **Ghi sổ kép và Định tuyến (Double-entry & Routing):** Trong Odoo, hàng hóa di chuyển giữa các "Địa điểm". Ví dụ: Nhập hàng là chuyển từ "Địa điểm Nhà cung cấp" sang "Địa điểm Kho nội bộ". Các kho có quy mô lớn có thể thiết lập định tuyến đa bước (Multi-step routing) như: Nhận hàng -> Kiểm tra chất lượng (Quality Control) -> Đưa lên kệ.
+
+
+* **Truy xuất theo Lô và Số Sê-ri (Lots & Serials):** Số sê-ri được dùng cho sản phẩm đơn lẻ (ví dụ: máy tính, điện thoại để bảo hành), còn Lô (Lot) dùng cho hàng sản xuất hàng loạt (thực phẩm, dược phẩm). Việc quản lý Lô kết hợp với Ngày hết hạn (Expiration Date) giúp kho thực hiện chiến lược xuất hàng FEFO (hết hạn trước, xuất trước).
+
+
+* **Kiểm kê kho (Inventory Adjustments):** Khi đếm hàng thực tế phát hiện sai lệch, thủ kho sẽ tạo phiếu điều chỉnh để cập nhật lại số lượng (on-hand quantity) trên hệ thống.
+
+
+
+**4. Xuất Nhập khẩu và Chi phí về kho (Import/Export & Landed Costs)**
+
+* **Khu vực Thông quan (Customs Zones):** Khi đơn mua/bán có đánh dấu là đơn hàng quốc tế (Foreign Import / Export Order), hàng hóa sẽ không vào thẳng kho mà đi qua một bước trung gian là Khu vực Thông quan. Tại đây, hàng bị "giữ" lại chờ tới khi tờ khai hải quan và các thủ tục thuế được hoàn tất thì mới được phép nhập kho (hoặc giao cho hãng tàu xuất đi).
+
+
+* **Phân bổ Chi phí về kho (Landed Costs):** Để tính đúng giá vốn hàng bán, các chi phí như phí vận tải, thuế nhập khẩu, bảo hiểm phải được cộng dồn vào giá trị lô hàng. Odoo cho phép phân bổ chi phí này theo các tiêu chí: Theo Giá trị (thường áp dụng cho Thuế), Theo Khối lượng, hoặc Theo Thể tích (dành cho cước phí vận tải). Lưu ý rằng để dùng được tính năng này, sản phẩm phải được thiết lập phương pháp tính giá vốn là FIFO (Nhập trước Xuất trước) hoặc AVCO (Giá bình quân).
+
+
+
+**5. Kế toán và Tài chính (Accounting)**
+
+* **Kiểm soát Đối chiếu 3 bước (3-way Matching):** Đây là chốt chặn quan trọng để tránh thất thoát. Khi nhận Hóa đơn (Vendor Bill) từ nhà cung cấp, kế toán sẽ yêu cầu hệ thống đối chiếu tự động 3 chứng từ: Đơn mua hàng (số lượng đặt) - Phiếu nhận hàng (số lượng kho thực nhận) - Hóa đơn (số lượng bị tính tiền). Nếu có sai lệch, hệ thống sẽ cảnh báo.
+
+
+* **Đóng sổ và Tuân thủ VAS:** Với các doanh nghiệp tại Việt Nam, Odoo có các bản địa hóa để hỗ trợ hệ thống tài khoản theo Thông tư 200 hoặc 133, tự động hóa quy trình kết chuyển cuối năm (chuyển doanh thu/chi phí về tài khoản 911), và lập các báo cáo tài chính cốt lõi như Bảng cân đối kế toán, Báo cáo kết quả hoạt động kinh doanh. Odoo cũng hỗ trợ tích hợp xuất hóa đơn điện tử (ví dụ: SInvoice) theo quy định của cơ quan Thuế.
+
+
+
+**6. Quản lý Sản xuất (Manufacturing)**
+
+* **Bóc tách BOM Đa cấp (Exploding BoMs):** BOM quy định thành phần để tạo ra sản phẩm. Odoo hỗ trợ BOM đa cấp (sản phẩm A được cấu thành từ cụm lắp ráp B, cụm B lại được cấu thành từ linh kiện C, D). Khi có lệnh sản xuất, hệ thống sẽ tự động bóc tách (explode) toàn bộ chuỗi này để tính toán chính xác tổng lượng nguyên liệu thô cần thiết ở tầng thấp nhất.
+
+
+* **Trung tâm Sản xuất (Work Centers):** Quản lý năng lực của từng tổ máy hoặc nhân công. Nó theo dõi Thời gian chuẩn bị (Setup Time - ví dụ thời gian thay khuôn), thời gian chạy máy, công suất xử lý, từ đó đo lường hiệu suất thực tế của nhà máy (chỉ số OEE) để phát hiện tình trạng thắt nút cổ chai.
