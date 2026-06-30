@@ -52,17 +52,27 @@ def _format_context(chunks) -> str:
     return "\n".join(parts)
 
 
+def passes_floor(result) -> bool:
+    """Cheap no-result pre-filter shared by doc-only synthesis and fusion.
+
+    True if any chunk clears the cosine floor (COS_FLOOR) or has any sparse
+    (FTS) hit. Skips the LLM on an obviously-empty/off-topic retrieval; a
+    keyword (FTS) hit always counts.
+    """
+    return (
+        any(c.dense_score is not None and c.dense_score >= COS_FLOOR
+            for c in result.chunks)
+        or any(c.sparse_score is not None for c in result.chunks)
+    )
+
+
 async def synthesize(query: str, result, llm) -> str:
     """Grounded answer + citation footer, or GUARD_MSG when nothing answers.
 
     Guard = cheap cosine pre-filter (no LLM on an obviously-empty/off-topic
     retrieval) backed by the LLM answerability sentinel.
     """
-    passes = (
-        any(c.dense_score is not None and c.dense_score >= COS_FLOOR for c in result.chunks)
-        or any(c.sparse_score is not None for c in result.chunks)
-    )
-    if result.is_empty() or not passes:
+    if result.is_empty() or not passes_floor(result):
         return GUARD_MSG
     resp = await llm.ainvoke([
         SystemMessage(content=RAG_SYNTHESIS_PROMPT),

@@ -95,3 +95,19 @@ async def test_synthesize_happy_appends_footer():
     assert "Khách được hoàn trong 30 ngày." in out
     assert "📄 Nguồn:" in out
     assert "policy.docx, tr.1" in out
+
+
+def test_passes_floor_dense_above_floor():
+    assert syn.passes_floor(_result([_chunk(dense_score=0.7, sparse_score=None)])) is True
+
+
+def test_passes_floor_below_and_no_sparse():
+    assert syn.passes_floor(_result([_chunk(dense_score=0.2, sparse_score=None)])) is False
+
+
+def test_passes_floor_sparse_only():
+    assert syn.passes_floor(_result([_chunk(dense_score=None, sparse_score=0.1)])) is True
+
+
+def test_passes_floor_empty():
+    assert syn.passes_floor(_result([])) is False
