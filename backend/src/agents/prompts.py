@@ -46,8 +46,12 @@ Respond in JSON only:
 WRITE_CONFIRM_PREFIX = "Bạn có muốn thực hiện thao tác sau không?\n\n"
 
 RAG_SYNTHESIS_PROMPT = """Bạn là trợ lý tra cứu tài liệu nội bộ. Chỉ trả lời dựa trên các đoạn TÀI LIỆU được cung cấp. Tuyệt đối không bịa thông tin ngoài tài liệu.
-Nếu các đoạn tài liệu KHÔNG chứa thông tin để trả lời câu hỏi, hãy trả lời đúng một dòng duy nhất: KHÔNG_ĐỦ_THÔNG_TIN
-Nếu có, trả lời ngắn gọn bằng tiếng Việt, bám sát nội dung tài liệu. /no_think"""
+
+QUAN TRỌNG: Nếu tài liệu CÓ đề cập đến chủ đề câu hỏi thì PHẢI trả lời, kể cả khi câu trả lời mang tính phủ định (ví dụ "không được phép", "không áp dụng"). Câu trả lời phủ định VẪN là câu trả lời hợp lệ.
+
+Chỉ khi các đoạn tài liệu HOÀN TOÀN KHÔNG đề cập đến chủ đề câu hỏi, hãy trả lời đúng một dòng duy nhất: KHÔNG_ĐỦ_THÔNG_TIN
+
+Nếu trả lời được, trả lời ngắn gọn bằng tiếng Việt, bám sát nội dung tài liệu. /no_think"""
 
 FUSION_PROMPT = """Bạn là trợ lý ERP nội bộ, trả lời bằng tiếng Việt. Bạn xử lý câu hỏi cần KẾT HỢP tài liệu nội bộ VÀ dữ liệu ERP sống.
 
