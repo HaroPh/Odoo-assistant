@@ -8,11 +8,24 @@ appends a deterministic citation footer. Write tools are filtered out — fusion
 read-only. rag/ stays synthesis-free; all answer/citation logic lives here.
 """
 import asyncio
+import logging
 
 from langchain_core.tools import tool
+from langchain_core.messages import AIMessage
+from langchain.agents import create_agent as _create_agent
 
-from .synthesis import passes_floor, _format_context
+from .state import ERPAgentState
+from .prompts import FUSION_PROMPT
+from .synthesis import passes_floor, _format_context, build_citations, SAFE_MSG
 from ..rag.retrieve import retrieve
+
+logger = logging.getLogger(__name__)
+
+WRITE_TOOL_NAMES = frozenset({
+    "confirm_sale_order", "confirm_purchase_order", "post_invoice",
+    "validate_picking", "create_quotation", "create_rfq",
+    "inventory_adjustment",
+})
 
 
 def _make_search_documents_tool(collected: list):
@@ -33,3 +46,34 @@ def _make_search_documents_tool(collected: list):
         return _format_context(result.chunks)
 
     return search_documents
+
+
+def make_fusion_node(llm, tools):
+    """Group-3 fusion: a bounded-agentic agent over Odoo READ tools +
+    search_documents. Write tools are filtered out (read-only). The node appends
+    a deterministic citation footer for whatever documents were retrieved this
+    turn. Any failure degrades to SAFE_MSG — the graph never crashes.
+    """
+    read_tools = [t for t in tools if t.name not in WRITE_TOOL_NAMES]
+
+    async def fusion_node(state: ERPAgentState) -> dict:
+        last_human = next(
+            (m for m in reversed(state["messages"]) if m.type == "human"), None)
+        if last_human is None:
+            return {"messages": [AIMessage(content=SAFE_MSG)]}
+        collected: list = []
+        search_tool = _make_search_documents_tool(collected)
+        agent = _create_agent(llm, [*read_tools, search_tool],
+                              system_prompt=FUSION_PROMPT)
+        try:
+            result = await agent.ainvoke({"messages": state["messages"]})
+            answer = (result["messages"][-1].content or "").strip()
+            if not answer:
+                return {"messages": [AIMessage(content=SAFE_MSG)]}
+            answer += build_citations(collected)
+        except Exception:
+            logger.exception("fusion_node failed")
+            answer = SAFE_MSG
+        return {"messages": [AIMessage(content=answer)]}
+
+    return fusion_node
