@@ -1,0 +1,92 @@
+"""LangChain tool wrappers around the Business Query API. Each tool returns the
+envelope as JSON text (the agent reads it; orchestration in C parses `data`)."""
+import json
+
+from langchain_core.tools import tool
+
+from . import sales, inventory, purchase, accounting
+
+
+def _json(envelope) -> str:
+    return json.dumps(envelope, ensure_ascii=False)
+
+
+def build_erp_query_tools() -> list:
+    @tool
+    def find_customer(name: str) -> str:
+        """Tìm khách hàng theo tên/email/điện thoại; trả về các ứng viên + ID."""
+        return _json(sales.find_customer(name))
+
+    @tool
+    def find_supplier(name: str) -> str:
+        """Tìm nhà cung cấp theo tên/email/điện thoại; trả về ứng viên + ID."""
+        return _json(purchase.find_supplier(name))
+
+    @tool
+    def find_product(name_or_code: str) -> str:
+        """Tìm sản phẩm theo tên hoặc mã (SKU/barcode); trả về ứng viên + ID."""
+        return _json(inventory.find_product(name_or_code))
+
+    @tool
+    def list_sale_orders(state: str = "", customer: str = "",
+                         date_from: str = "", date_to: str = "") -> str:
+        """Liệt kê đơn bán; lọc theo state/khách/khoảng ngày (YYYY-MM-DD), bỏ trống = bỏ lọc."""
+        return _json(sales.list_sale_orders(state or None, customer or None,
+                                            date_from or None, date_to or None))
+
+    @tool
+    def get_sale_order_detail(ref: str) -> str:
+        """Chi tiết dòng sản phẩm của một đơn bán theo mã (vd S00042)."""
+        return _json(sales.get_sale_order_detail(ref))
+
+    @tool
+    def get_product_price(product_id: int, partner_id: int = 0, qty: float = 1.0) -> str:
+        """Giá bán hiệu lực của 1 sản phẩm (theo bảng giá), tùy chọn cho 1 khách + số lượng."""
+        return _json(sales.get_product_price(product_id, partner_id or None, qty))
+
+    @tool
+    def sales_summary(period: str = "month") -> str:
+        """Tổng hợp doanh thu theo kỳ: month|quarter|year."""
+        return _json(sales.sales_summary(period))
+
+    @tool
+    def top_products(by: str = "quantity", period: str = "") -> str:
+        """Top sản phẩm bán chạy theo 'quantity' hoặc 'revenue', kỳ tùy chọn."""
+        return _json(sales.top_products(by, period or None))
+
+    @tool
+    def get_stock(product: str = "") -> str:
+        """Tồn kho nội bộ; lọc theo tên sản phẩm (bỏ trống = tất cả)."""
+        return _json(inventory.get_stock(product or None))
+
+    @tool
+    def get_lots(product: str = "") -> str:
+        """Lô/sê-ri và tồn theo lô; lọc theo tên sản phẩm."""
+        return _json(inventory.get_lots(product or None))
+
+    @tool
+    def list_purchase_orders(state: str = "", vendor: str = "",
+                             date_from: str = "", date_to: str = "") -> str:
+        """Liệt kê đơn mua; lọc theo state/nhà cung cấp/khoảng ngày."""
+        return _json(purchase.list_purchase_orders(state or None, vendor or None,
+                                                   date_from or None, date_to or None))
+
+    @tool
+    def get_purchase_order_detail(ref: str) -> str:
+        """Chi tiết dòng sản phẩm của một đơn mua theo mã (vd P00003)."""
+        return _json(purchase.get_purchase_order_detail(ref))
+
+    @tool
+    def list_invoices(move_type: str, partner: str = "", payment_state: str = "") -> str:
+        """Hóa đơn đã phát hành; move_type = out_invoice (bán) | in_invoice (mua)."""
+        return _json(accounting.list_invoices(move_type, partner or None, payment_state or None))
+
+    @tool
+    def get_overdue_invoices() -> str:
+        """Hóa đơn khách hàng quá hạn (chưa trả hết, đến hạn đã qua)."""
+        return _json(accounting.get_overdue_invoices())
+
+    return [find_customer, find_supplier, find_product, list_sale_orders,
+            get_sale_order_detail, get_product_price, sales_summary, top_products,
+            get_stock, get_lots, list_purchase_orders, get_purchase_order_detail,
+            list_invoices, get_overdue_invoices]

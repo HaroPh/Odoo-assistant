@@ -2,6 +2,7 @@
 from langgraph.graph import StateGraph, END
 
 from .state import ERPAgentState
+from ..erp_query.tools import build_erp_query_tools
 from .nodes import (
     make_intent_router_node,
     make_erp_read_node,
@@ -28,11 +29,11 @@ def build_graph(llm, tools, checkpointer) -> object:
     g = StateGraph(ERPAgentState)
 
     g.add_node("intent_router", make_intent_router_node(llm))
-    g.add_node("erp_read", make_erp_read_node(llm, tools))
+    g.add_node("erp_read", make_erp_read_node(llm, build_erp_query_tools()))
     g.add_node("erp_write_planner", make_erp_write_planner_node(llm))
     g.add_node("erp_write_executor", make_erp_write_executor_node(tools))
     g.add_node("rag", make_rag_node(llm))
-    g.add_node("mixed", make_fusion_node(llm, tools))
+    g.add_node("mixed", make_fusion_node(llm, build_erp_query_tools()))
     g.add_node("respond_unknown", make_respond_unknown_node(llm))
 
     g.set_entry_point("intent_router")

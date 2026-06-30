@@ -1,0 +1,47 @@
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
+from backend.src.erp_query.gateway import Gateway
+from backend.src.erp_query import sales
+
+
+class FakeTransport:
+    def __init__(self, ret): self.ret = ret; self.calls = []
+    def call(self, model, method, args, kwargs):
+        self.calls.append((model, method, args, kwargs)); return self.ret
+
+
+def _gw(rows): return Gateway(FakeTransport(rows))
+
+
+def test_find_customer_delegates_to_resolve():
+    out = sales.find_customer("Azur", gw=_gw([(41, "Azur Interior")]))
+    assert out["data"]["matches"][0]["id"] == 41
+
+
+def test_list_sale_orders_builds_domain_and_envelope():
+    rows = [{"name": "S00042", "partner_id": [41, "Azur"], "date_order": "2026-06-01",
+             "state": "sale", "amount_total": 320000.0, "delivery_status": "pending"}]
+    gw = _gw(rows)
+    out = sales.list_sale_orders(state="sale", customer="Azur", gw=gw)
+    assert out["status"] == "success"
+    assert out["data"]["count"] == 1
+    assert out["data"]["rows"][0]["name"] == "S00042"
+    assert "S00042" in out["display"]
+
+
+def test_get_product_price_uses_context_price_not_list_price():
+    # transport returns the context-computed `price` field
+    gw = _gw([{"id": 552, "price": 320000.0}])
+    out = sales.get_product_price(552, partner_id=41, qty=2, gw=gw)
+    assert out["data"]["price"] == 320000.0
+    assert out["data"]["product_id"] == 552
+    # the read asked for `price` (context-computed), never `list_price`
+    fields = gw._t.calls[-1][3]["fields"]
+    assert "price" in fields and "list_price" not in fields
+
+
+def test_sales_summary_uses_read_group():
+    gw = _gw([{"amount_total": 1000.0, "partner_id": [41, "Azur"]}])
+    out = sales.sales_summary(period="month", gw=gw)
+    assert out["status"] == "success"
+    assert gw._t.calls[-1][1] == "read_group"

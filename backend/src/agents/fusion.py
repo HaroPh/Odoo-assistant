@@ -3,9 +3,11 @@
 
 A bounded-agentic tool-calling agent that answers Group-3 questions needing both
 internal documents and live ERP data. It calls search_documents (a thin wrapper
-over rag.retrieve) and the Odoo read tools, reasons over both, and the node
-appends a deterministic citation footer. Write tools are filtered out — fusion is
-read-only. rag/ stays synthesis-free; all answer/citation logic lives here.
+over rag.retrieve) and the erp_query business read tools, reasons over both, and
+the node appends a deterministic citation footer. The WRITE_TOOL_NAMES filter
+keeps fusion read-only as a defense-in-depth guard even though the graph now
+hands it only read tools. rag/ stays synthesis-free; all answer/citation logic
+lives here.
 """
 import asyncio
 import logging
@@ -49,7 +51,7 @@ def _make_search_documents_tool(collected: list):
 
 
 def make_fusion_node(llm, tools):
-    """Group-3 fusion: a bounded-agentic agent over Odoo READ tools +
+    """Group-3 fusion: a bounded-agentic agent over the erp_query READ tools +
     search_documents. Write tools are filtered out (read-only). The node appends
     a deterministic citation footer for whatever documents were retrieved this
     turn. Any failure degrades to SAFE_MSG — the graph never crashes.
