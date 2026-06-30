@@ -1,0 +1,120 @@
+# Eval set — Vietnamese RAG recall@k pairs
+# Each entry: q (question), expect_file (basename), expect_section (optional substring of section_path)
+
+# --- policy.docx (Chính sách hoàn hàng) ---
+- q: "tôi mua hàng cách đây hơn một tháng, giờ trả lại được không?"
+  expect_file: "policy.docx"
+  expect_section: "Mục 1"
+
+- q: "điều kiện để được hoàn hàng là gì?"
+  expect_file: "policy.docx"
+  expect_section: "Mục 1"
+
+- q: "sản phẩm phải như thế nào mới được hoàn trả?"
+  expect_file: "policy.docx"
+  expect_section: "Mục 1"
+
+- q: "hàng giảm giá có được trả lại không?"
+  expect_file: "policy.docx"
+  expect_section: "Mục 2"
+
+- q: "hàng điện tử có được hoàn trả không?"
+  expect_file: "policy.docx"
+  expect_section: "Mục 2"
+
+- q: "làm thế nào để hoàn hàng?"
+  expect_file: "policy.docx"
+  expect_section: "Mục 3"
+
+- q: "quy trình hoàn hàng như thế nào?"
+  expect_file: "policy.docx"
+  expect_section: "Mục 3"
+
+- q: "hoàn tiền mất bao nhiêu ngày?"
+  expect_file: "policy.docx"
+  expect_section: "Mục 4"
+
+- q: "tiền hoàn trả được chuyển về đâu?"
+  expect_file: "policy.docx"
+  expect_section: "Mục 4"
+
+- q: "có thể đổi hàng thay vì lấy tiền lại không?"
+  expect_file: "policy.docx"
+  expect_section: "Mục 5"
+
+# --- sop.docx (Quy trình nhập kho) ---
+- q: "nhân viên kho làm gì khi nhận hàng?"
+  expect_file: "sop.docx"
+  expect_section: "Bước 1"
+
+- q: "cần kiểm đếm hàng hóa như thế nào khi nhập kho?"
+  expect_file: "sop.docx"
+  expect_section: "Bước 1"
+
+- q: "khi số lượng thực nhận thiếu so với đơn thì xử lý thế nào?"
+  expect_file: "sop.docx"
+  expect_section: "Bước 2"
+
+- q: "phần mềm nào dùng để so sánh số lượng hàng thực nhận với đơn đặt hàng?"
+  expect_file: "sop.docx"
+  expect_section: "Bước 2"
+
+- q: "bộ phận kiểm tra chất lượng lấy mẫu theo tỷ lệ nào?"
+  expect_file: "sop.docx"
+  expect_section: "Bước 3"
+
+- q: "hàng bị lỗi phải giải quyết trong khoảng thời gian nào?"
+  expect_file: "sop.docx"
+  expect_section: "Bước 3"
+
+- q: "sau khi nhập kho cập nhật tồn kho ở đâu?"
+  expect_file: "sop.docx"
+  expect_section: "Bước 4"
+
+# --- sla.docx (Thỏa thuận mức dịch vụ nhà cung cấp) ---
+- q: "bao lâu sau khi đặt thì nhà cung cấp phải giao xong?"
+  expect_file: "sla.docx"
+  expect_section: "Điều 3"
+
+- q: "đơn hàng khẩn cấp được giao trong bao nhiêu ngày?"
+  expect_file: "sla.docx"
+  expect_section: "Điều 3"
+
+- q: "mỗi ngày giao trễ nhà cung cấp bị trừ bao nhiêu?"
+  expect_file: "sla.docx"
+  expect_section: "Điều 5"
+
+- q: "nếu nhà cung cấp giao trễ nhiều ngày thì khoản phạt bị giới hạn ở mức nào?"
+  expect_file: "sla.docx"
+  expect_section: "Điều 5"
+
+- q: "bên mình phải trả tiền cho nhà cung cấp trong vòng mấy ngày kể từ khi nhận hàng?"
+  expect_file: "sla.docx"
+  expect_section: "Điều 6"
+
+- q: "thanh toán trước hạn thì được giảm giá không?"
+  expect_file: "sla.docx"
+  expect_section: "Điều 6"
+
+- q: "hàng nhà cung cấp giao bị hỏng tối đa mấy phần trăm thì còn chấp nhận được?"
+  expect_file: "sla.docx"
+  expect_section: "Điều 2"
+
+# --- bang_gia.xlsx (Bảng giá) ---
+- q: "tủ lớn bán giá nhiêu?"
+  expect_file: "bang_gia.xlsx"
+
+- q: "bàn làm việc giá bao nhiêu tiền?"
+  expect_file: "bang_gia.xlsx"
+
+- q: "ghế văn phòng mua hết bao nhiêu?"
+  expect_file: "bang_gia.xlsx"
+
+- q: "laptop 15 inch giá bao nhiêu trong bảng giá?"
+  expect_file: "bang_gia.xlsx"
+
+- q: "màn hình máy tính mua thì tốn bao nhiêu?"
+  expect_file: "bang_gia.xlsx"
+
+- q: "một ram giấy A4 giá mấy đồng?"
+  expect_file: "bang_gia.xlsx"
