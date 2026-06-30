@@ -42,3 +42,7 @@ Respond in JSON only:
 }"""
 
 WRITE_CONFIRM_PREFIX = "Bạn có muốn thực hiện thao tác sau không?\n\n"
+
+RAG_SYNTHESIS_PROMPT = """Bạn là trợ lý tra cứu tài liệu nội bộ. Chỉ trả lời dựa trên các đoạn TÀI LIỆU được cung cấp. Tuyệt đối không bịa thông tin ngoài tài liệu.
+Nếu các đoạn tài liệu KHÔNG chứa thông tin để trả lời câu hỏi, hãy trả lời đúng một dòng duy nhất: KHÔNG_ĐỦ_THÔNG_TIN
+Nếu có, trả lời ngắn gọn bằng tiếng Việt, bám sát nội dung tài liệu. /no_think"""
