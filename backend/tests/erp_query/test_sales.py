@@ -29,15 +29,15 @@ def test_list_sale_orders_builds_domain_and_envelope():
     assert "S00042" in out["display"]
 
 
-def test_get_product_price_uses_context_price_not_list_price():
-    # transport returns the context-computed `price` field
-    gw = _gw([{"id": 552, "price": 320000.0}])
+def test_get_product_price_reads_list_price():
+    # Odoo 19 has no context-computed `price` field on product.product, and the
+    # read-only gateway can't call a pricelist method → list_price is the price.
+    gw = _gw([{"id": 552, "name": "Tủ", "list_price": 320000.0}])
     out = sales.get_product_price(552, partner_id=41, qty=2, gw=gw)
     assert out["data"]["price"] == 320000.0
     assert out["data"]["product_id"] == 552
-    # the read asked for `price` (context-computed), never `list_price`
     fields = gw._t.calls[-1][3]["fields"]
-    assert "price" in fields and "list_price" not in fields
+    assert "list_price" in fields
 
 
 def test_sales_summary_uses_read_group():

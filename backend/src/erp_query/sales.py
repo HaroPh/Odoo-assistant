@@ -69,25 +69,20 @@ def get_sale_order_detail(ref, *, gw=None):
 
 
 def get_product_price(product_id, partner_id=None, qty=1.0, *, gw=None):
-    """Effective sell price via the context-computed `price` field (pricelist
-    applied) — never the bare list_price."""
+    """Sell price = the product's `list_price` (giá niêm yết). Pricelist-applied
+    pricing needs an ORM *method* (e.g. `_get_contextual_price`), which the
+    read-only gateway does not permit, and Odoo 19 dropped the context-computed
+    `price` field on product.product — so list_price is the gateway-readable
+    sale price. `partner_id` is accepted for API stability but not used here."""
     gw = gw or default_gateway()
-    ctx = {"quantity": qty}
-    if partner_id:
-        ctx["partner"] = partner_id
     try:
-        if partner_id:
-            p = gw.search_read("res.partner", [["id", "=", partner_id]],
-                               ["property_product_pricelist"], limit=1)
-            if p and p[0].get("property_product_pricelist"):
-                ctx["pricelist"] = p[0]["property_product_pricelist"][0]
         rows = gw.search_read("product.product", [["id", "=", product_id]],
-                              ["name", "price"], limit=1, context=ctx)
+                              ["name", "list_price"], limit=1)
     except Exception as e:                                  # noqa: BLE001
         return err(f"Lỗi tra giá: {e}")
     if not rows:
         return err(f"Không tìm thấy sản phẩm ID {product_id}.")
-    price = rows[0].get("price") or 0.0
+    price = rows[0].get("list_price") or 0.0
     return ok({"product_id": product_id, "name": rows[0].get("name"),
                "price": price, "qty": qty},
               f"Giá {rows[0].get('name')}: {price:,.0f} (SL {qty:g}).")
