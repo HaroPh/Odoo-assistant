@@ -3,7 +3,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 from langgraph.types import Command
-from backend.src.agents.erp_agent import _decide_resume, _pending_kind, _pending_options
+from backend.src.agents.erp_agent import (_decide_resume, _pending_kind,
+                                          _pending_options, _is_parked)
 
 
 class _Itr:
@@ -23,6 +24,28 @@ def test_pending_kind_and_options():
                   "options": [{"id": 1, "name": "A"}]})
     assert _pending_kind(snap) == "disambiguation"
     assert _pending_options(snap) == [{"id": 1, "name": "A"}]
+
+
+def test_is_parked_detects_pending_interrupt_when_next_empty():
+    # The double-interrupt bug: after a disambiguation resume, the graph suspends
+    # at the confirm interrupt but snapshot.next comes back empty. Parked must be
+    # detected via the pending interrupt, or the user's "có" is dropped to fresh.
+    snap = _Snap({"kind": "confirm", "question": "Xác nhận?", "expires_at": 0})
+    assert not getattr(snap, "next", None)   # _Snap has no `next` → falsy
+    assert _is_parked(snap) is True
+
+
+def test_is_parked_false_when_idle():
+    class _Idle:
+        tasks = ()
+    assert _is_parked(_Idle()) is False
+
+
+def test_is_parked_true_when_next_present():
+    class _Next:
+        tasks = ()
+        next = ("erp_write_executor",)
+    assert _is_parked(_Next()) is True
 
 
 @pytest.mark.asyncio

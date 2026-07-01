@@ -54,6 +54,15 @@ def _pending_expiry(snapshot) -> float | None:
     return None
 
 
+def _is_parked(snapshot) -> bool:
+    """Is the thread waiting on the user (a pending interrupt)? Check the pending
+    interrupt directly, not just `snapshot.next`: after resuming one interrupt and
+    hitting a SECOND in the same node (disambiguation → confirm), LangGraph leaves
+    `snapshot.next` empty while the confirm interrupt is still pending — so relying
+    on `next` alone drops the user's confirm into the fresh-request path."""
+    return bool(_pending_question(snapshot)) or bool(getattr(snapshot, "next", None))
+
+
 def _pending_kind(snapshot) -> str | None:
     """Kind of the interrupt a parked thread waits on: 'confirm'|'disambiguation'."""
     for task in getattr(snapshot, "tasks", ()) or ():
@@ -136,7 +145,7 @@ class ERPAgent:
         # If the thread is parked at a write-confirmation interrupt, this turn is
         # the user's answer — classify it and resume instead of starting over.
         snapshot = await self.graph.aget_state(config)
-        if getattr(snapshot, "next", None):
+        if _is_parked(snapshot):
             expires_at = _pending_expiry(snapshot)
             if expires_at is not None and time.time() > expires_at:
                 # Stale confirmation: discard it (resume=False is a no-op write,
