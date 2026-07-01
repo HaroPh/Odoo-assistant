@@ -111,6 +111,11 @@ def make_erp_write_planner_node(llm):
             logger.warning("Write planner returned non-JSON: %s", response.content)
             return {"messages": [AIMessage(content="Không thể xác định thao tác cần thực hiện. Vui lòng mô tả rõ hơn.")]}
 
+        # create_quotation needs entity resolution + pricing + its own confirm —
+        # hand it to the deterministic create_order coordinator (do NOT interrupt here).
+        if plan.get("tool") == "create_quotation":
+            return {"pending_action": plan}
+
         summary = plan.get("summary") or plan.get("tool") or "thao tác"
         question = WRITE_CONFIRM_PREFIX + f"**{summary}**\n\nXác nhận? (có / không)"
         ttl = int(os.environ.get("CONFIRMATION_TTL_SECONDS", "300"))

@@ -109,7 +109,7 @@ async def test_write_planner_payload_carries_expires_at(monkeypatch):
     monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
     monkeypatch.setenv("CONFIRMATION_TTL_SECONDS", "300")
 
-    plan_json = json.dumps({"tool": "create_quotation", "args": {}, "summary": "x"})
+    plan_json = json.dumps({"tool": "confirm_sale_order", "args": {}, "summary": "x"})
     llm = make_mock_llm(plan_json)
 
     import backend.src.agents.nodes as nodes_mod

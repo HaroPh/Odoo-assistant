@@ -46,3 +46,19 @@ def test_mixed_node_built_with_erp_query_read_tools(monkeypatch):
     # ...and no MCP write/do-tool leaks into fusion
     assert "post_invoice" not in captured["names"]
     assert "confirm_sale_order" not in captured["names"]
+
+
+def test_route_after_planner_sends_create_quotation_to_coordinator():
+    from backend.src.agents.graph import _route_after_write_planner
+    from langgraph.graph import END
+    assert _route_after_write_planner({"pending_action": None}) == END
+    assert _route_after_write_planner(
+        {"pending_action": {"tool": "create_quotation"}}) == "create_order"
+    assert _route_after_write_planner(
+        {"pending_action": {"tool": "confirm_sale_order"}}) == "erp_write_executor"
+
+
+def test_build_graph_has_create_order_node():
+    llm = MagicMock()
+    graph = build_graph(llm, tools=[], checkpointer=None)
+    assert "create_order" in graph.get_graph().nodes
