@@ -11,7 +11,7 @@ from langchain_core.messages import AIMessage
 from langgraph.types import interrupt as _interrupt
 
 from .state import ERPAgentState
-from .nodes import _tool_result_text
+from .tool_result import _tool_result_text
 from ..erp_query import sales, inventory
 
 WRITE_DISABLED_MSG = ("Tính năng ghi (tạo/sửa đơn hàng, cập nhật tồn kho) "

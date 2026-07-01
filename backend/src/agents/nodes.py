@@ -12,6 +12,7 @@ from .state import ERPAgentState
 from .prompts import INTENT_ROUTER_PROMPT, SYSTEM_PROMPT, WRITE_PLANNER_PROMPT, WRITE_CONFIRM_PREFIX
 from ..rag.retrieve import retrieve
 from .synthesis import synthesize, SAFE_MSG
+from .tool_result import _tool_result_text
 
 logger = logging.getLogger(__name__)
 
@@ -130,23 +131,6 @@ def make_erp_write_planner_node(llm):
 
 
 # ── erp_write_executor ────────────────────────────────────────────────────────
-
-def _tool_result_text(result) -> str:
-    """Normalize a tool result to plain text.
-
-    langchain MCP tools return a list of content-block dicts
-    (e.g. [{"type": "text", "text": "..."}]) rather than a bare string;
-    surface the joined text, not its repr.
-    """
-    if isinstance(result, str):
-        return result
-    if isinstance(result, list):
-        parts = [b.get("text", "") if isinstance(b, dict) else str(b)
-                 for b in result]
-        joined = "".join(parts).strip()
-        return joined or str(result)
-    return str(result)
-
 
 def make_erp_write_executor_node(tools):
     """Execute the confirmed write by invoking the named tool directly.
