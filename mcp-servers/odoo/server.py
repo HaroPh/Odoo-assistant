@@ -383,25 +383,41 @@ def _resolve_product(term, ok_field):
 
 
 @mcp.tool()
-def create_quotation(partner_name: str, lines: list) -> str:
+def create_quotation(partner_name: str = "", lines: list | None = None,
+                     partner_id: int = 0) -> str:
     """Tạo báo giá nháp (sale.order) cho một khách hàng với các dòng sản phẩm.
-    Resolve tên khách + tên từng sản phẩm; nếu có gì không rõ thì DỪNG, không
-    tạo đơn dở. YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+    Ưu tiên ID đã resolve (partner_id, mỗi dòng product_id); nếu vắng ID thì
+    resolve theo tên (partner_name, mỗi dòng product). Nếu có gì không rõ thì
+    DỪNG, không tạo đơn dở. YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
 
     Args:
-        partner_name: Tên khách hàng (tìm gần đúng).
-        lines: Danh sách dòng hàng, mỗi dòng {"product": "<tên SP>", "qty": <số>}.
+        partner_name: Tên khách hàng (tìm gần đúng) — dùng khi không có partner_id.
+        lines: Danh sách dòng hàng, mỗi dòng {"product": "<tên>", "qty": <số>} hoặc
+               {"product_id": <id>, "qty": <số>}.
+        partner_id: ID khách hàng đã resolve (ưu tiên hơn partner_name).
     """
+    lines = lines or []
     if not lines:
         return "Vui lòng cho biết sản phẩm và số lượng cần báo giá."
 
-    partner, msg = _resolve_partner(partner_name, "khách hàng",
-                                    "Vui lòng nêu rõ tên khách hàng.")
-    if msg:
-        return msg
+    if partner_id:
+        prows = odoo("res.partner", "read", [[partner_id]], {"fields": ["id", "name"]})
+        if not prows:
+            return f"Không tìm thấy khách hàng ID {partner_id}."
+        partner = prows[0]
+    else:
+        partner, msg = _resolve_partner(partner_name, "khách hàng",
+                                        "Vui lòng nêu rõ tên khách hàng.")
+        if msg:
+            return msg
 
     order_line = []
     for line in lines:
+        pid = line.get("product_id")
+        if pid:
+            order_line.append((0, 0, {"product_id": pid,
+                                      "product_uom_qty": line["qty"]}))
+            continue
         prod, pmsg = _resolve_product(line["product"], "sale_ok")
         if pmsg:
             return pmsg
