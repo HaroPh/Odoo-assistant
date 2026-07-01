@@ -481,8 +481,8 @@ def create_rfq(supplier_name: str = "", lines: list | None = None,
 
 
 @mcp.tool()
-def inventory_adjustment(product_name: str, new_qty: float,
-                         location_name: str | None = None) -> str:
+def inventory_adjustment(new_qty: float, product_name: str = "",
+                         location_name: str | None = None, product_id: int = 0) -> str:
     """Điều chỉnh tồn kho thực tế của một sản phẩm về một SỐ TUYỆT ĐỐI tại một
     vị trí kho (kiểm kê). new_qty là tồn kho KẾT QUẢ mong muốn, không phải lượng
     tăng/giảm. Nếu không nêu vị trí thì dùng kho chính. YÊU CẦU XÁC NHẬN từ người
@@ -496,9 +496,15 @@ def inventory_adjustment(product_name: str, new_qty: float,
     if new_qty < 0:
         return "Số lượng tồn kho không hợp lệ (không âm)."
 
-    prod, msg = _resolve_product(product_name, "is_storable")
-    if msg:
-        return msg
+    if product_id:
+        prows = odoo("product.product", "read", [[product_id]], {"fields": ["id", "name"]})
+        if not prows:
+            return f"Không tìm thấy sản phẩm ID {product_id}."
+        prod = prows[0]
+    else:
+        prod, msg = _resolve_product(product_name, "is_storable")
+        if msg:
+            return msg
 
     if location_name:
         lrows = odoo("stock.location", "search_read",

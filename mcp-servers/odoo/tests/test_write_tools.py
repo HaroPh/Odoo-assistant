@@ -426,14 +426,14 @@ def test_inventory_adjustment_negative_rejected(monkeypatch):
         calls.append((model, method, args))
         return []
     monkeypatch.setattr(server, "odoo", fake_odoo)
-    out = fn("inventory_adjustment")("Large Cabinet", -5)
+    out = fn("inventory_adjustment")(-5, "Large Cabinet")
     assert "không hợp lệ" in out.lower()
     assert calls == []  # nothing touched
 
 
 def test_inventory_adjustment_product_not_found(monkeypatch):
     patch_odoo(monkeypatch, {("product.product", "search_read"): []})
-    out = fn("inventory_adjustment")("Nonexistent", 10)
+    out = fn("inventory_adjustment")(10, "Nonexistent")
     assert "không tìm thấy" in out.lower()
 
 
@@ -449,7 +449,7 @@ def test_inventory_adjustment_location_ambiguous_aborts(monkeypatch):
                     {"id": 27, "complete_name": "My Co/Tồn kho"}]
         return []
     monkeypatch.setattr(server, "odoo", fake_odoo)
-    out = fn("inventory_adjustment")("Large Cabinet", 50, "Tồn kho")
+    out = fn("inventory_adjustment")(50, "Large Cabinet", "Tồn kho")
     assert "nhiều" in out.lower()
     assert not any(c[1] in ("write", "create", "action_apply_inventory")
                    for c in calls)
@@ -474,7 +474,7 @@ def test_inventory_adjustment_existing_quant_sets_and_applies(monkeypatch):
             return [{"quantity": 480.0}]
         return []
     monkeypatch.setattr(server, "odoo", fake_odoo)
-    out = fn("inventory_adjustment")("Large Cabinet", 480)
+    out = fn("inventory_adjustment")(480, "Large Cabinet")
     assert ("stock.quant", "write", [[3], {"inventory_quantity": 480}]) in calls
     assert ("stock.quant", "action_apply_inventory", [[3]]) in calls
     assert "500" in out and "480" in out and "Large Cabinet" in out
@@ -499,7 +499,7 @@ def test_inventory_adjustment_no_quant_creates_and_applies(monkeypatch):
             return [{"quantity": 30.0}]
         return []
     monkeypatch.setattr(server, "odoo", fake_odoo)
-    out = fn("inventory_adjustment")("Corner Desk", 30)
+    out = fn("inventory_adjustment")(30, "Corner Desk")
     assert any(c[0] == "stock.quant" and c[1] == "create" and
                c[2][0] == {"product_id": 19, "location_id": 5,
                            "inventory_quantity": 30}
@@ -524,5 +524,5 @@ def test_inventory_adjustment_conflict_dict_safe_message(monkeypatch):
                     "res_model": "stock.inventory.conflict"}
         return []
     monkeypatch.setattr(server, "odoo", fake_odoo)
-    out = fn("inventory_adjustment")("Large Cabinet", 480)
+    out = fn("inventory_adjustment")(480, "Large Cabinet")
     assert "xung đột" in out.lower()
