@@ -10,6 +10,7 @@ from langgraph.types import interrupt as _interrupt
 
 from .state import ERPAgentState
 from .prompts import INTENT_ROUTER_PROMPT, SYSTEM_PROMPT, WRITE_PLANNER_PROMPT, WRITE_CONFIRM_PREFIX
+from .write_registry import COORDINATED_TOOLS
 from ..rag.retrieve import retrieve
 from .synthesis import synthesize, SAFE_MSG
 from .tool_result import _tool_result_text
@@ -112,9 +113,8 @@ def make_erp_write_planner_node(llm):
             logger.warning("Write planner returned non-JSON: %s", response.content)
             return {"messages": [AIMessage(content="Không thể xác định thao tác cần thực hiện. Vui lòng mô tả rõ hơn.")]}
 
-        # create_quotation needs entity resolution + pricing + its own confirm —
-        # hand it to the deterministic create_order coordinator (do NOT interrupt here).
-        if plan.get("tool") == "create_quotation":
+        # Coordinated writes own their own resolution + confirm; don't interrupt here.
+        if plan.get("tool") in COORDINATED_TOOLS:
             return {"pending_action": plan}
 
         summary = plan.get("summary") or plan.get("tool") or "thao tác"

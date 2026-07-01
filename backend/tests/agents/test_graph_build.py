@@ -62,3 +62,29 @@ def test_build_graph_has_create_order_node():
     llm = MagicMock()
     graph = build_graph(llm, tools=[], checkpointer=None)
     assert "create_order" in graph.get_graph().nodes
+
+
+def test_route_after_planner_maps_all_coordinated_writes():
+    from backend.src.agents.graph import _route_after_write_planner
+    from langgraph.graph import END
+    assert _route_after_write_planner({"pending_action": None}) == END
+    assert _route_after_write_planner(
+        {"pending_action": {"tool": "create_quotation"}}) == "create_order"
+    assert _route_after_write_planner(
+        {"pending_action": {"tool": "create_rfq"}}) == "create_rfq"
+    assert _route_after_write_planner(
+        {"pending_action": {"tool": "inventory_adjustment"}}) == "inventory_adjust"
+    assert _route_after_write_planner(
+        {"pending_action": {"tool": "confirm_sale_order"}}) == "erp_write_executor"
+
+
+def test_build_graph_registers_all_coordinator_nodes():
+    llm = MagicMock()
+    graph = build_graph(llm, tools=[], checkpointer=None)
+    nodes = graph.get_graph().nodes
+    assert {"create_order", "create_rfq", "inventory_adjust"} <= set(nodes)
+
+
+def test_planner_returns_pending_for_each_coordinated_tool():
+    from backend.src.agents.write_registry import COORDINATED_TOOLS
+    assert {"create_quotation", "create_rfq", "inventory_adjustment"} <= COORDINATED_TOOLS

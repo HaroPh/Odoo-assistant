@@ -12,7 +12,7 @@ from .nodes import (
     make_respond_unknown_node,
 )
 from .fusion import make_fusion_node
-from .create_order import make_create_order_node
+from .write_registry import WRITE_COORDINATORS, COORDINATED_TOOLS
 
 
 def _route_by_intent(state: ERPAgentState) -> str:
@@ -24,8 +24,9 @@ def _route_after_write_planner(state: ERPAgentState) -> str:
     if action is None:
         # Write locked or unparseable: planner already added a message → END
         return END
-    if action.get("tool") == "create_quotation":
-        return "create_order"
+    tool = action.get("tool")
+    if tool in COORDINATED_TOOLS:
+        return WRITE_COORDINATORS[tool].node
     return "erp_write_executor"
 
 
@@ -38,8 +39,9 @@ def build_graph(llm, tools, checkpointer) -> object:
     g.add_node("erp_write_executor", make_erp_write_executor_node(tools))
     g.add_node("rag", make_rag_node(llm))
     g.add_node("mixed", make_fusion_node(llm, build_erp_query_tools()))
-    g.add_node("create_order", make_create_order_node(llm, tools))
     g.add_node("respond_unknown", make_respond_unknown_node(llm))
+    for spec in WRITE_COORDINATORS.values():
+        g.add_node(spec.node, spec.build(llm, tools))
 
     g.set_entry_point("intent_router")
 
@@ -52,13 +54,12 @@ def build_graph(llm, tools, checkpointer) -> object:
     })
 
     g.add_edge("erp_read", END)
-    g.add_conditional_edges("erp_write_planner", _route_after_write_planner, {
-        END: END,
-        "erp_write_executor": "erp_write_executor",
-        "create_order": "create_order",
-    })
+    write_targets = {END: END, "erp_write_executor": "erp_write_executor"}
+    write_targets.update({spec.node: spec.node for spec in WRITE_COORDINATORS.values()})
+    g.add_conditional_edges("erp_write_planner", _route_after_write_planner, write_targets)
     g.add_edge("erp_write_executor", END)
-    g.add_edge("create_order", END)
+    for spec in WRITE_COORDINATORS.values():
+        g.add_edge(spec.node, END)
     g.add_edge("rag", END)
     g.add_edge("mixed", END)
     g.add_edge("respond_unknown", END)
