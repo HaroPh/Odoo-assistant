@@ -432,34 +432,50 @@ def create_quotation(partner_name: str = "", lines: list | None = None,
 
 
 @mcp.tool()
-def create_rfq(supplier_name: str, lines: list) -> str:
+def create_rfq(supplier_name: str = "", lines: list | None = None,
+               partner_id: int = 0) -> str:
     """Tạo RFQ — đơn mua nháp (purchase.order) cho một nhà cung cấp với các dòng
-    sản phẩm. Resolve tên NCC + tên từng sản phẩm; nếu có gì không rõ thì DỪNG,
-    không tạo đơn dở. YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+    sản phẩm. Ưu tiên ID đã resolve (partner_id, mỗi dòng product_id); nếu vắng ID
+    thì resolve theo tên. Nếu có gì không rõ thì DỪNG, không tạo đơn dở. YÊU CẦU
+    XÁC NHẬN từ người dùng trước khi gọi.
 
     Args:
-        supplier_name: Tên nhà cung cấp (tìm gần đúng).
-        lines: Danh sách dòng hàng, mỗi dòng {"product": "<tên SP>", "qty": <số>}.
+        supplier_name: Tên nhà cung cấp (tìm gần đúng) — dùng khi không có partner_id.
+        lines: Danh sách dòng hàng, mỗi dòng {"product": "<tên>", "qty": <số>} hoặc
+               {"product_id": <id>, "qty": <số>}.
+        partner_id: ID nhà cung cấp đã resolve (ưu tiên hơn supplier_name).
     """
+    lines = lines or []
     if not lines:
         return "Vui lòng cho biết sản phẩm và số lượng cần đặt mua."
 
-    vendor, msg = _resolve_partner(supplier_name, "nhà cung cấp",
-                                   "Vui lòng nêu rõ tên nhà cung cấp.")
-    if msg:
-        return msg
+    if partner_id:
+        vrows = odoo("res.partner", "read", [[partner_id]], {"fields": ["id", "name"]})
+        if not vrows:
+            return f"Không tìm thấy nhà cung cấp ID {partner_id}."
+        vendor = vrows[0]
+    else:
+        vendor, msg = _resolve_partner(supplier_name, "nhà cung cấp",
+                                       "Vui lòng nêu rõ tên nhà cung cấp.")
+        if msg:
+            return msg
 
     order_line = []
     for line in lines:
+        pid = line.get("product_id")
+        if pid:
+            order_line.append((0, 0, {"product_id": pid,
+                                      "product_qty": line["qty"]}))
+            continue
         prod, pmsg = _resolve_product(line["product"], "purchase_ok")
         if pmsg:
             return pmsg
         order_line.append((0, 0, {"product_id": prod["id"],
                                   "product_qty": line["qty"]}))
 
-    pid = odoo("purchase.order", "create",
-               [{"partner_id": vendor["id"], "order_line": order_line}])
-    po = odoo("purchase.order", "read", [[pid]], {"fields": ["name"]})
+    pid_ = odoo("purchase.order", "create",
+                [{"partner_id": vendor["id"], "order_line": order_line}])
+    po = odoo("purchase.order", "read", [[pid_]], {"fields": ["name"]})
     name = po[0]["name"] if po else "?"
     return f"Đã tạo RFQ {name} cho {vendor['name']} ({len(lines)} dòng)."
 
