@@ -41,6 +41,7 @@ ODOO_METHOD_OPERATION_MAP = {
     "default_get": "read", "name_get": "read", "get_metadata": "read",
     # CREATE — Phase 3: cần confirmation
     "create": "create", "copy": "create", "name_create": "create",
+    "create_invoices": "create",
     # WRITE — Phase 3: cần confirmation
     "write": "write", "toggle_active": "write",
     "action_archive": "write", "message_post": "write",
@@ -324,6 +325,61 @@ def post_invoice(partner_name: str, amount: float | None = None,
     posted = odoo("account.move", "read", [[row["id"]]], {"fields": ["name"]})
     name = posted[0]["name"] if posted else "?"
     return f"Đã phát hành hóa đơn {name} cho {partner}."
+
+
+@mcp.tool()
+def create_invoice_from_order(order_ref: str) -> str:
+    """Tạo hóa đơn nháp (account.move) từ một đơn bán ĐÃ XÁC NHẬN.
+    Chỉ tạo nháp — phát hành hóa đơn là bước riêng (post_invoice). Đơn chưa
+    xác nhận sẽ bị từ chối kèm gợi ý xác nhận trước.
+    YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        order_ref: Mã đơn bán, ví dụ "S00012".
+    """
+    rows = odoo("sale.order", "search_read",
+                [[["name", "=", order_ref]]],
+                {"fields": ["id", "name", "state", "invoice_status", "invoice_ids"],
+                 "limit": 2})
+    if not rows:
+        return envelope(False, f"Không tìm thấy đơn '{order_ref}'.")
+    if len(rows) > 1:
+        return envelope(False, f"Có nhiều đơn tên '{order_ref}'. Vui lòng nêu rõ hơn.")
+
+    so = rows[0]
+    name = so["name"]
+    if so["state"] not in ("sale", "done"):
+        return envelope(False, f"Đơn {name} chưa xác nhận (trạng thái nháp). "
+                               f"Hãy xác nhận đơn trước khi tạo hóa đơn.")
+    if so["invoice_status"] != "to invoice":
+        # Verified-live: after full invoicing Odoo 19 reports 'no' (not
+        # 'invoiced'), so one guard covers both not-deliverable and done.
+        return envelope(False, f"Không có gì để xuất hóa đơn cho đơn {name} "
+                               f"(chưa giao hàng, hoặc đã xuất đủ).")
+
+    before = set(so["invoice_ids"] or [])
+    ctx = {"active_model": "sale.order", "active_ids": [so["id"]],
+           "active_id": so["id"]}
+    try:
+        wid = odoo("sale.advance.payment.inv", "create",
+                   [{"advance_payment_method": "delivered"}], {"context": ctx})
+        # create_invoices returns an action dict Odoo can't marshal over
+        # XML-RPC; odoo() maps that benign Fault to None — success is verified
+        # by re-reading invoice_ids below, never from this return value.
+        odoo("sale.advance.payment.inv", "create_invoices", [[wid]],
+             {"context": ctx})
+    except Exception as e:                                   # noqa: BLE001
+        return envelope(False, f"Lỗi khi tạo hóa đơn cho đơn {name}: {e}")
+
+    after = odoo("sale.order", "read", [[so["id"]]], {"fields": ["invoice_ids"]})
+    new_ids = [i for i in (after[0]["invoice_ids"] if after else [])
+               if i not in before]
+    if not new_ids:
+        return envelope(False, f"Không tạo được hóa đơn cho đơn {name} — "
+                               f"vui lòng kiểm tra trên Odoo.")
+    return envelope(True, f"Đã tạo hóa đơn nháp cho đơn {name} (chưa phát hành).",
+                    ref=None, model="account.move", res_id=max(new_ids),
+                    state="draft")
 
 
 @mcp.tool()
