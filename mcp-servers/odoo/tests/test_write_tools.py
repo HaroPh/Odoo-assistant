@@ -604,6 +604,7 @@ def test_post_invoice_by_id_posts_draft(monkeypatch):
     assert data["state"] == "posted"
     assert ("account.move", "action_post", [[61]]) in cap
     assert ["id", "=", 61] in calls[0]["args"][0]      # id-filtered domain
+    assert ["move_type", "in", ["out_invoice", "in_invoice"]] in calls[0]["args"][0]
 
 
 def test_post_invoice_by_id_already_posted(monkeypatch):

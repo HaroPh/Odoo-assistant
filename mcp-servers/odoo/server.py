@@ -302,7 +302,8 @@ def post_invoice(partner_name: str = "", amount: float | None = None,
     """
     if invoice_id:
         rows = odoo("account.move", "search_read",
-                    [[["id", "=", invoice_id]]],
+                    [[["id", "=", invoice_id],
+                      ["move_type", "in", ["out_invoice", "in_invoice"]]]],
                     {"fields": ["id", "name", "state", "partner_id"], "limit": 1})
         if not rows:
             return envelope(False, f"Không tìm thấy hóa đơn ID {invoice_id}.")
