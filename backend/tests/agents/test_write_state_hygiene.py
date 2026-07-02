@@ -18,6 +18,16 @@ def _tool(name, ret):
     return t
 
 
+def _raising_tool(name="confirm_sale_order"):
+    t = MagicMock()
+    t.name = name
+
+    async def ainvoke(args):
+        raise RuntimeError("boom")
+    t.ainvoke = ainvoke
+    return t
+
+
 def _envelope(tool_ref="S00031", res_id=42):
     return json.dumps({"ok": True, "ref": tool_ref, "model": "sale.order",
                        "res_id": res_id, "state": "sale",
@@ -52,10 +62,24 @@ async def test_executor_plain_string_no_last_write():
 async def test_executor_cancel_and_error_paths_clear_state():
     node = make_erp_write_executor_node([])
     cancel = await node({"confirmed": False, "pending_action": {"tool": "x"}})
-    assert cancel["pending_action"] is None and cancel["last_write"] is None
+    assert (cancel["pending_action"] is None and cancel["confirmed"] is None
+            and cancel["last_write"] is None)
     missing = await node({"confirmed": True,
                           "pending_action": {"tool": "ghost", "args": {}}})
-    assert missing["pending_action"] is None and missing["last_write"] is None
+    assert (missing["pending_action"] is None and missing["confirmed"] is None
+            and missing["last_write"] is None)
+
+
+@pytest.mark.asyncio
+async def test_executor_exception_path_clears_state():
+    # The except Exception branch must clear all three keys too, else a raised
+    # write leaves stale pending_action/confirmed for a later turn to re-fire.
+    node = make_erp_write_executor_node([_raising_tool()])
+    err = await node({"confirmed": True,
+                      "pending_action": {"tool": "confirm_sale_order", "args": {}}})
+    assert (err["pending_action"] is None and err["confirmed"] is None
+            and err["last_write"] is None)
+    assert "Lỗi khi thực hiện thao tác" in err["messages"][-1].content
 
 
 @pytest.mark.asyncio
