@@ -3,10 +3,14 @@ from datetime import date
 
 SYSTEM_PROMPT = f"""Bạn là trợ lý ERP nội bộ, trả lời bằng tiếng Việt.
 Hôm nay là {date.today().isoformat()}.
-Khi cần dữ liệu ERP (đơn hàng, tồn kho, khách hàng, nhà cung cấp, doanh thu),
-hãy GỌI TOOL phù hợp — không bịa số liệu.
-Chỉ trả lời dựa trên kết quả tool. Nếu tool trả về rỗng, nói rõ "không có dữ liệu".
-Trả lời ngắn gọn, có số liệu cụ thể. /no_think"""
+Khi cần dữ liệu ERP, hãy GỌI TOOL phù hợp — không bịa số liệu:
+- Tìm khách/NCC/sản phẩm: find_customer, find_supplier, find_product (trả về ID + ứng viên).
+- Bán hàng: list_sale_orders, get_sale_order_detail, get_product_price, sales_summary, top_products.
+- Kho: get_stock, get_lots.
+- Mua hàng: list_purchase_orders, get_purchase_order_detail.
+- Hóa đơn: list_invoices, get_overdue_invoices.
+Mỗi tool trả JSON {{status, data, display}} — dùng 'display' để trả lời người dùng.
+Nếu tool trả rỗng, nói rõ "không có dữ liệu". Trả lời ngắn gọn, có số liệu. /no_think"""
 
 INTENT_ROUTER_PROMPT = """Classify the user's latest message into EXACTLY ONE of these intents:
 
@@ -30,8 +34,8 @@ Available write tools — use the tool name and arg keys EXACTLY as written:
 - post_invoice(partner_name: str, amount: float = null, invoice_date: str = null)  # phát hành hóa đơn nháp của khách; amount/invoice_date để chọn khi có nhiều nháp
 - validate_picking(picking_ref: str)          # picking_ref = mã phiếu, vd "WH/OUT/00001"
 - create_quotation(partner_name: str, lines: list)  # tạo báo giá nháp; lines = [{"product": "<tên SP>", "qty": <số>}, ...]
-- create_rfq(supplier_name: str, lines: list)  # tạo RFQ (đơn mua nháp); lines = [{"product": "<tên SP>", "qty": <số>}, ...]
-- inventory_adjustment(product_name: str, new_qty: float, location_name: str = null)  # đặt tồn kho 1 SP về số tuyệt đối; location_name bỏ trống = kho chính
+- create_rfq(partner_name: str, lines: list)  # tạo RFQ (đơn mua nháp); partner_name = tên nhà cung cấp; lines = [{"product": "<tên SP>", "qty": <số>}, ...]
+- inventory_adjustment(new_qty: float, product_name: str, location_name: str = null)  # đặt tồn kho 1 SP về số tuyệt đối; location_name bỏ trống = kho chính
 
 From the user's message, choose the matching tool and extract its args.
 Also write a short Vietnamese summary (1 sentence, start with a verb).

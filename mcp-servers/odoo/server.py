@@ -1,6 +1,6 @@
 """
-Odoo MCP Server — Phase 1: Read-Only
-Odoo 19 field names (validated via discovery script 2026-06-23).
+Odoo MCP Server — Phase 2: Write/Do-tools only
+Reads moved to backend/src/erp_query/ (Tasks 1–8).
 
 Transport: HTTP/SSE tại port 8001
 Connect:   http://mcp-odoo:8001/sse  (từ backend container)
@@ -219,344 +219,6 @@ def resolve_unique(rows, kind_label, describe, hint=""):
 # ─── TOOLS ───────────────────────────────────────────────────────────────────
 
 @mcp.tool()
-def get_late_orders(limit: int = 50) -> str:
-    """
-    Lấy các đơn bán hàng đang trễ: đã xác nhận, có ngày giao (commitment_date),
-    chưa giao đủ, và ngày giao đã qua hôm nay.
-    """
-    now = now_iso()
-    domain = [
-        ["state", "in", ["sale", "done"]],
-        ["commitment_date", "<", now],
-        ["delivery_status", "!=", "full"],
-    ]
-    rows = odoo("sale.order", "search_read", [domain], {
-        "fields": ["name", "partner_id", "date_order", "commitment_date",
-                   "delivery_status", "amount_total", "state"],
-        "limit": limit,
-        "order": "commitment_date asc",
-    })
-    if not rows:
-        return "Không có đơn hàng nào đang trễ."
-    lines = [f"Ngày hiện tại: {today_iso()} — {len(rows)} đơn trễ:\n"]
-    for r in rows:
-        partner = r["partner_id"][1] if r["partner_id"] else "N/A"
-        commit  = (r.get("commitment_date") or "N/A")[:10]
-        lines.append(
-            f"  {r['name']} | Khách: {partner} | Ngày giao: {commit} "
-            f"| Trạng thái giao: {r['delivery_status']} | Tổng: {r['amount_total']:,.0f}"
-        )
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def search_orders(
-    state: str | None = None,
-    partner_name: str | None = None,
-    date_from: str | None = None,
-    date_to: str | None = None,
-    limit: int = 50,
-) -> str:
-    """
-    Tìm kiếm đơn bán hàng (sale.order).
-
-    Args:
-        state: Trạng thái — draft | sent | sale | done | cancel (bỏ trống = tất cả)
-        partner_name: Tên khách hàng (tìm gần đúng)
-        date_from: Ngày đặt hàng từ (YYYY-MM-DD)
-        date_to: Ngày đặt hàng đến (YYYY-MM-DD)
-        limit: Số dòng tối đa (mặc định 50)
-    """
-    domain: list = []
-    if state:
-        domain.append(["state", "=", state])
-    if partner_name:
-        domain.append(["partner_id.name", "ilike", partner_name])
-    if date_from:
-        domain.append(["date_order", ">=", date_from + " 00:00:00"])
-    if date_to:
-        domain.append(["date_order", "<=", date_to + " 23:59:59"])
-
-    rows = odoo("sale.order", "search_read", [domain], {
-        "fields": ["name", "partner_id", "date_order", "commitment_date",
-                   "state", "amount_total", "delivery_status"],
-        "limit": limit,
-        "order": "date_order desc",
-    })
-    if not rows:
-        return "Không tìm thấy đơn hàng nào phù hợp."
-    lines = [f"Tìm thấy {len(rows)} đơn hàng (hiển thị tối đa {limit}):\n"]
-    for r in rows:
-        partner = r["partner_id"][1] if r["partner_id"] else "N/A"
-        date_o  = (r.get("date_order") or "N/A")[:10]
-        lines.append(
-            f"  {r['name']} | {partner} | Ngày: {date_o} "
-            f"| Trạng thái: {r['state']} | Tổng: {r['amount_total']:,.0f}"
-        )
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def get_inventory(
-    product_name: str | None = None,
-    low_stock_threshold: float | None = None,
-    limit: int = 100,
-) -> str:
-    """
-    Xem tồn kho hiện tại (stock.quant, chỉ kho nội bộ).
-
-    Args:
-        product_name: Lọc theo tên sản phẩm (tìm gần đúng)
-        low_stock_threshold: Nếu set, chỉ trả sản phẩm có available_quantity <= ngưỡng này
-        limit: Số dòng tối đa
-    """
-    domain: list = [["location_id.usage", "=", "internal"]]
-    if product_name:
-        domain.append(["product_id.name", "ilike", product_name])
-
-    # available_quantity là computed (không stored) → KHÔNG filter/order trong SQL.
-    # Khi cần lọc theo ngưỡng: fetch rộng rồi lọc + cắt limit trong Python.
-    fetch_limit = 1000 if low_stock_threshold is not None else limit
-    rows = odoo("stock.quant", "search_read", [domain], {
-        "fields": ["product_id", "location_id", "quantity",
-                   "reserved_quantity", "available_quantity", "product_uom_id"],
-        "limit": fetch_limit,
-        "order": "product_id asc",
-    })
-    if low_stock_threshold is not None:
-        rows = [r for r in rows if (r.get("available_quantity") or 0) <= low_stock_threshold]
-    rows = rows[:limit]
-    if not rows:
-        return "Không có dữ liệu tồn kho phù hợp."
-    lines = [f"Tồn kho nội bộ — {len(rows)} dòng:\n"]
-    for r in rows:
-        product  = r["product_id"][1] if r["product_id"] else "N/A"
-        location = r["location_id"][1] if r["location_id"] else "N/A"
-        uom      = r["product_uom_id"][1] if r["product_uom_id"] else ""
-        lines.append(
-            f"  {product:40s} | Kho: {location} "
-            f"| Có: {r['available_quantity']:.1f} {uom} "
-            f"(Tổng: {r['quantity']:.1f}, Đặt trước: {r['reserved_quantity']:.1f})"
-        )
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def search_customers(
-    name: str | None = None,
-    limit: int = 50,
-) -> str:
-    """
-    Tìm khách hàng (res.partner có customer_rank > 0).
-
-    Args:
-        name: Tên khách hàng (tìm gần đúng, bỏ trống = tất cả)
-        limit: Số dòng tối đa
-    """
-    domain: list = [["customer_rank", ">", 0]]
-    if name:
-        domain.append(["name", "ilike", name])
-
-    rows = odoo("res.partner", "search_read", [domain], {
-        "fields": ["name", "email", "phone", "customer_rank", "sale_order_count"],
-        "limit": limit,
-        "order": "customer_rank desc, name asc",  # sale_order_count là computed, không order được
-    })
-    if not rows:
-        return "Không tìm thấy khách hàng."
-    lines = [f"Tìm thấy {len(rows)} khách hàng:\n"]
-    for r in rows:
-        lines.append(
-            f"  {r['name']:35s} | Email: {r.get('email') or 'N/A':30s} "
-            f"| Số đơn: {r['sale_order_count']}"
-        )
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def search_suppliers(
-    name: str | None = None,
-    limit: int = 50,
-) -> str:
-    """
-    Tìm nhà cung cấp (res.partner có supplier_rank > 0).
-
-    Args:
-        name: Tên nhà cung cấp (bỏ trống = tất cả)
-        limit: Số dòng tối đa
-    """
-    domain: list = [["supplier_rank", ">", 0]]
-    if name:
-        domain.append(["name", "ilike", name])
-
-    rows = odoo("res.partner", "search_read", [domain], {
-        "fields": ["name", "email", "phone", "supplier_rank", "purchase_order_count"],
-        "limit": limit,
-        "order": "supplier_rank desc, name asc",  # purchase_order_count là computed
-    })
-    if not rows:
-        return "Không tìm thấy nhà cung cấp."
-    lines = [f"Tìm thấy {len(rows)} nhà cung cấp:\n"]
-    for r in rows:
-        lines.append(
-            f"  {r['name']:35s} | Email: {r.get('email') or 'N/A':30s} "
-            f"| Số PO: {r['purchase_order_count']}"
-        )
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def search_purchase_orders(
-    state: str | None = None,
-    vendor_name: str | None = None,
-    date_from: str | None = None,
-    date_to: str | None = None,
-    limit: int = 50,
-) -> str:
-    """
-    Tìm đơn mua hàng (purchase.order).
-
-    Args:
-        state: draft | sent | purchase | done | cancel (bỏ trống = tất cả)
-        vendor_name: Tên nhà cung cấp (tìm gần đúng)
-        date_from: Ngày đặt từ (YYYY-MM-DD)
-        date_to: Ngày đặt đến (YYYY-MM-DD)
-        limit: Số dòng tối đa
-    """
-    domain: list = []
-    if state:
-        domain.append(["state", "=", state])
-    if vendor_name:
-        domain.append(["partner_id.name", "ilike", vendor_name])
-    if date_from:
-        domain.append(["date_order", ">=", date_from + " 00:00:00"])
-    if date_to:
-        domain.append(["date_order", "<=", date_to + " 23:59:59"])
-
-    rows = odoo("purchase.order", "search_read", [domain], {
-        "fields": ["name", "partner_id", "date_order", "date_planned",
-                   "state", "amount_total", "receipt_status"],
-        "limit": limit,
-        "order": "date_order desc",
-    })
-    if not rows:
-        return "Không tìm thấy đơn mua hàng nào phù hợp."
-    lines = [f"Tìm thấy {len(rows)} đơn mua (hiển thị tối đa {limit}):\n"]
-    for r in rows:
-        vendor     = r["partner_id"][1] if r["partner_id"] else "N/A"
-        date_o     = (r.get("date_order") or "N/A")[:10]
-        date_plan  = (r.get("date_planned") or "N/A")[:10]
-        lines.append(
-            f"  {r['name']} | {vendor} | Đặt: {date_o} | Dự kiến nhận: {date_plan} "
-            f"| Trạng thái: {r['state']} | Tổng: {r['amount_total']:,.0f}"
-        )
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def get_sales_summary(period: str = "month") -> str:
-    """
-    Tổng hợp doanh thu theo kỳ.
-
-    Args:
-        period: month | quarter | year (tính đến hôm nay)
-    """
-    today = datetime.now(timezone.utc)
-    if period == "month":
-        date_from = today.replace(day=1).strftime("%Y-%m-%d")
-    elif period == "quarter":
-        q_start_month = ((today.month - 1) // 3) * 3 + 1
-        date_from = today.replace(month=q_start_month, day=1).strftime("%Y-%m-%d")
-    else:  # year
-        date_from = today.replace(month=1, day=1).strftime("%Y-%m-%d")
-
-    domain = [
-        ["state", "in", ["sale", "done"]],
-        ["date_order", ">=", date_from + " 00:00:00"],
-    ]
-    rows = odoo("sale.order", "search_read", [domain], {
-        "fields": ["name", "partner_id", "amount_total", "date_order"],
-        "limit": 500,
-    })
-
-    if not rows:
-        return f"Không có đơn hàng xác nhận nào từ {date_from} đến nay."
-
-    total = sum(r["amount_total"] for r in rows)
-
-    # Group by partner
-    by_partner: dict[str, float] = {}
-    for r in rows:
-        p = r["partner_id"][1] if r["partner_id"] else "Unknown"
-        by_partner[p] = by_partner.get(p, 0) + r["amount_total"]
-
-    top5 = sorted(by_partner.items(), key=lambda x: x[1], reverse=True)[:5]
-
-    lines = [
-        f"Doanh thu {period} (từ {date_from} đến {today_iso()}):",
-        f"  Tổng đơn: {len(rows)}",
-        f"  Tổng doanh thu: {total:,.0f}",
-        "",
-        "  Top 5 khách hàng:",
-    ]
-    for name, amt in top5:
-        lines.append(f"    {name:35s}: {amt:,.0f}")
-
-    return "\n".join(lines)
-
-
-def _period_date_from(period: str | None) -> str | None:
-    """period → ngày bắt đầu (YYYY-MM-DD). None = không lọc thời gian."""
-    if not period:
-        return None
-    today = datetime.now(timezone.utc)
-    if period == "month":
-        return today.replace(day=1).strftime("%Y-%m-%d")
-    if period == "quarter":
-        q = ((today.month - 1) // 3) * 3 + 1
-        return today.replace(month=q, day=1).strftime("%Y-%m-%d")
-    if period == "year":
-        return today.replace(month=1, day=1).strftime("%Y-%m-%d")
-    return None
-
-
-@mcp.tool()
-def get_top_products(by: str = "quantity", period: str | None = None,
-                     limit: int = 10) -> str:
-    """
-    Sản phẩm bán chạy nhất (từ dòng đơn bán, chỉ đơn đã xác nhận).
-
-    Args:
-        by: "quantity" (theo số lượng bán) hoặc "revenue" (theo doanh thu)
-        period: None|month|quarter|year — lọc theo ngày đặt, tính đến hôm nay
-        limit: số sản phẩm top (mặc định 10)
-    """
-    domain: list = [["order_id.state", "in", ["sale", "done"]]]
-    date_from = _period_date_from(period)
-    if date_from:
-        domain.append(["order_id.date_order", ">=", date_from + " 00:00:00"])
-
-    orderby = "price_subtotal desc" if by == "revenue" else "product_uom_qty desc"
-    rows = odoo("sale.order.line", "read_group",
-                [domain, ["product_uom_qty:sum", "price_subtotal:sum"], ["product_id"]],
-                {"orderby": orderby, "limit": limit, "lazy": False})
-    if not rows:
-        return "Không có dữ liệu bán hàng phù hợp."
-
-    metric = "doanh thu" if by == "revenue" else "số lượng"
-    scope = f" ({period})" if period else ""
-    lines = [f"Top {len(rows)} sản phẩm bán chạy theo {metric}{scope}:\n"]
-    for i, r in enumerate(rows, 1):
-        product = r["product_id"][1] if r.get("product_id") else "N/A"
-        qty     = r.get("product_uom_qty") or 0
-        revenue = r.get("price_subtotal") or 0
-        lines.append(
-            f"  {i:2d}. {product:42s} | SL bán: {qty:,.0f} | Doanh thu: {revenue:,.0f}"
-        )
-    return "\n".join(lines)
-
-
-@mcp.tool()
 def confirm_sale_order(order_ref: str) -> str:
     """
     Xác nhận một đơn bán hàng (sale.order) đang ở trạng thái nháp.
@@ -721,25 +383,41 @@ def _resolve_product(term, ok_field):
 
 
 @mcp.tool()
-def create_quotation(partner_name: str, lines: list) -> str:
+def create_quotation(partner_name: str = "", lines: list | None = None,
+                     partner_id: int = 0) -> str:
     """Tạo báo giá nháp (sale.order) cho một khách hàng với các dòng sản phẩm.
-    Resolve tên khách + tên từng sản phẩm; nếu có gì không rõ thì DỪNG, không
-    tạo đơn dở. YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+    Ưu tiên ID đã resolve (partner_id, mỗi dòng product_id); nếu vắng ID thì
+    resolve theo tên (partner_name, mỗi dòng product). Nếu có gì không rõ thì
+    DỪNG, không tạo đơn dở. YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
 
     Args:
-        partner_name: Tên khách hàng (tìm gần đúng).
-        lines: Danh sách dòng hàng, mỗi dòng {"product": "<tên SP>", "qty": <số>}.
+        partner_name: Tên khách hàng (tìm gần đúng) — dùng khi không có partner_id.
+        lines: Danh sách dòng hàng, mỗi dòng {"product": "<tên>", "qty": <số>} hoặc
+               {"product_id": <id>, "qty": <số>}.
+        partner_id: ID khách hàng đã resolve (ưu tiên hơn partner_name).
     """
+    lines = lines or []
     if not lines:
         return "Vui lòng cho biết sản phẩm và số lượng cần báo giá."
 
-    partner, msg = _resolve_partner(partner_name, "khách hàng",
-                                    "Vui lòng nêu rõ tên khách hàng.")
-    if msg:
-        return msg
+    if partner_id:
+        prows = odoo("res.partner", "read", [[partner_id]], {"fields": ["id", "name"]})
+        if not prows:
+            return f"Không tìm thấy khách hàng ID {partner_id}."
+        partner = prows[0]
+    else:
+        partner, msg = _resolve_partner(partner_name, "khách hàng",
+                                        "Vui lòng nêu rõ tên khách hàng.")
+        if msg:
+            return msg
 
     order_line = []
     for line in lines:
+        pid = line.get("product_id")
+        if pid:
+            order_line.append((0, 0, {"product_id": pid,
+                                      "product_uom_qty": line["qty"]}))
+            continue
         prod, pmsg = _resolve_product(line["product"], "sale_ok")
         if pmsg:
             return pmsg
@@ -754,41 +432,57 @@ def create_quotation(partner_name: str, lines: list) -> str:
 
 
 @mcp.tool()
-def create_rfq(supplier_name: str, lines: list) -> str:
+def create_rfq(supplier_name: str = "", lines: list | None = None,
+               partner_id: int = 0) -> str:
     """Tạo RFQ — đơn mua nháp (purchase.order) cho một nhà cung cấp với các dòng
-    sản phẩm. Resolve tên NCC + tên từng sản phẩm; nếu có gì không rõ thì DỪNG,
-    không tạo đơn dở. YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+    sản phẩm. Ưu tiên ID đã resolve (partner_id, mỗi dòng product_id); nếu vắng ID
+    thì resolve theo tên. Nếu có gì không rõ thì DỪNG, không tạo đơn dở. YÊU CẦU
+    XÁC NHẬN từ người dùng trước khi gọi.
 
     Args:
-        supplier_name: Tên nhà cung cấp (tìm gần đúng).
-        lines: Danh sách dòng hàng, mỗi dòng {"product": "<tên SP>", "qty": <số>}.
+        supplier_name: Tên nhà cung cấp (tìm gần đúng) — dùng khi không có partner_id.
+        lines: Danh sách dòng hàng, mỗi dòng {"product": "<tên>", "qty": <số>} hoặc
+               {"product_id": <id>, "qty": <số>}.
+        partner_id: ID nhà cung cấp đã resolve (ưu tiên hơn supplier_name).
     """
+    lines = lines or []
     if not lines:
         return "Vui lòng cho biết sản phẩm và số lượng cần đặt mua."
 
-    vendor, msg = _resolve_partner(supplier_name, "nhà cung cấp",
-                                   "Vui lòng nêu rõ tên nhà cung cấp.")
-    if msg:
-        return msg
+    if partner_id:
+        vrows = odoo("res.partner", "read", [[partner_id]], {"fields": ["id", "name"]})
+        if not vrows:
+            return f"Không tìm thấy nhà cung cấp ID {partner_id}."
+        vendor = vrows[0]
+    else:
+        vendor, msg = _resolve_partner(supplier_name, "nhà cung cấp",
+                                       "Vui lòng nêu rõ tên nhà cung cấp.")
+        if msg:
+            return msg
 
     order_line = []
     for line in lines:
+        pid = line.get("product_id")
+        if pid:
+            order_line.append((0, 0, {"product_id": pid,
+                                      "product_qty": line["qty"]}))
+            continue
         prod, pmsg = _resolve_product(line["product"], "purchase_ok")
         if pmsg:
             return pmsg
         order_line.append((0, 0, {"product_id": prod["id"],
                                   "product_qty": line["qty"]}))
 
-    pid = odoo("purchase.order", "create",
-               [{"partner_id": vendor["id"], "order_line": order_line}])
-    po = odoo("purchase.order", "read", [[pid]], {"fields": ["name"]})
+    pid_ = odoo("purchase.order", "create",
+                [{"partner_id": vendor["id"], "order_line": order_line}])
+    po = odoo("purchase.order", "read", [[pid_]], {"fields": ["name"]})
     name = po[0]["name"] if po else "?"
     return f"Đã tạo RFQ {name} cho {vendor['name']} ({len(lines)} dòng)."
 
 
 @mcp.tool()
-def inventory_adjustment(product_name: str, new_qty: float,
-                         location_name: str | None = None) -> str:
+def inventory_adjustment(new_qty: float, product_name: str = "",
+                         location_name: str | None = None, product_id: int = 0) -> str:
     """Điều chỉnh tồn kho thực tế của một sản phẩm về một SỐ TUYỆT ĐỐI tại một
     vị trí kho (kiểm kê). new_qty là tồn kho KẾT QUẢ mong muốn, không phải lượng
     tăng/giảm. Nếu không nêu vị trí thì dùng kho chính. YÊU CẦU XÁC NHẬN từ người
@@ -802,9 +496,15 @@ def inventory_adjustment(product_name: str, new_qty: float,
     if new_qty < 0:
         return "Số lượng tồn kho không hợp lệ (không âm)."
 
-    prod, msg = _resolve_product(product_name, "is_storable")
-    if msg:
-        return msg
+    if product_id:
+        prows = odoo("product.product", "read", [[product_id]], {"fields": ["id", "name"]})
+        if not prows:
+            return f"Không tìm thấy sản phẩm ID {product_id}."
+        prod = prows[0]
+    else:
+        prod, msg = _resolve_product(product_name, "is_storable")
+        if msg:
+            return msg
 
     if location_name:
         lrows = odoo("stock.location", "search_read",
@@ -848,366 +548,6 @@ def inventory_adjustment(product_name: str, new_qty: float,
     now = q[0]["quantity"] if q else new_qty
     return (f"Đã điều chỉnh tồn kho {prod['name']} tại {loc['complete_name']}: "
             f"{old:g} → {now:g}.")
-
-
-# ─── READ TOOLS (T1 expansion) ────────────────────────────────────────────────
-
-@mcp.tool()
-def get_customer_invoices(partner_name: str | None = None,
-                          payment_state: str | None = None,
-                          limit: int = 50) -> str:
-    """Hóa đơn khách hàng (account.move, out_invoice đã phát hành).
-
-    Args:
-        partner_name: Lọc theo tên khách (tìm gần đúng).
-        payment_state: not_paid | in_payment | partial | paid | reversed.
-        limit: Số dòng tối đa.
-    """
-    domain = [["move_type", "=", "out_invoice"], ["state", "=", "posted"]]
-    if partner_name:
-        domain.append(["partner_id.name", "ilike", partner_name])
-    if payment_state:
-        domain.append(["payment_state", "=", payment_state])
-    rows = odoo("account.move", "search_read", [domain], {
-        "fields": ["name", "partner_id", "invoice_date", "invoice_date_due",
-                   "amount_total", "amount_residual", "payment_state"],
-        "limit": limit, "order": "invoice_date desc",
-    })
-    if not rows:
-        return "Không có hóa đơn khách hàng nào phù hợp."
-    lines = [f"{len(rows)} hóa đơn khách hàng:\n"]
-    for r in rows:
-        partner = r["partner_id"][1] if r["partner_id"] else "N/A"
-        lines.append(
-            f"  {r['name']} | {partner} | Ngày: {r.get('invoice_date') or 'N/A'} "
-            f"| Tổng: {r['amount_total']:,.0f} | Còn nợ: {r['amount_residual']:,.0f} "
-            f"| TT: {r['payment_state']}")
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def get_vendor_bills(vendor_name: str | None = None,
-                     payment_state: str | None = None,
-                     limit: int = 50) -> str:
-    """Hóa đơn nhà cung cấp (account.move, in_invoice đã phát hành).
-
-    Args:
-        vendor_name: Lọc theo tên nhà cung cấp (tìm gần đúng).
-        payment_state: not_paid | in_payment | partial | paid | reversed.
-        limit: Số dòng tối đa.
-    """
-    domain = [["move_type", "=", "in_invoice"], ["state", "=", "posted"]]
-    if vendor_name:
-        domain.append(["partner_id.name", "ilike", vendor_name])
-    if payment_state:
-        domain.append(["payment_state", "=", payment_state])
-    rows = odoo("account.move", "search_read", [domain], {
-        "fields": ["name", "partner_id", "invoice_date", "invoice_date_due",
-                   "amount_total", "amount_residual", "payment_state"],
-        "limit": limit, "order": "invoice_date desc",
-    })
-    if not rows:
-        return "Không có hóa đơn nhà cung cấp nào phù hợp."
-    lines = [f"{len(rows)} hóa đơn nhà cung cấp:\n"]
-    for r in rows:
-        partner = r["partner_id"][1] if r["partner_id"] else "N/A"
-        lines.append(
-            f"  {r['name']} | {partner} | Ngày: {r.get('invoice_date') or 'N/A'} "
-            f"| Tổng: {r['amount_total']:,.0f} | Còn nợ: {r['amount_residual']:,.0f} "
-            f"| TT: {r['payment_state']}")
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def get_overdue_invoices(limit: int = 50) -> str:
-    """Hóa đơn khách hàng quá hạn (chưa trả hết, đến hạn đã qua)."""
-    today = today_iso()
-    domain = [
-        ["move_type", "=", "out_invoice"], ["state", "=", "posted"],
-        ["payment_state", "in", ["not_paid", "partial"]],
-        ["invoice_date_due", "<", today],
-    ]
-    rows = odoo("account.move", "search_read", [domain], {
-        "fields": ["name", "partner_id", "invoice_date_due",
-                   "amount_total", "amount_residual"],
-        "limit": limit, "order": "invoice_date_due asc",
-    })
-    if not rows:
-        return "Không có hóa đơn nào quá hạn."
-    lines = [f"Ngày hiện tại: {today} — {len(rows)} hóa đơn quá hạn:\n"]
-    for r in rows:
-        partner = r["partner_id"][1] if r["partner_id"] else "N/A"
-        lines.append(
-            f"  {r['name']} | {partner} | Đến hạn: {r.get('invoice_date_due') or 'N/A'} "
-            f"| Còn nợ: {r['amount_residual']:,.0f} / {r['amount_total']:,.0f}")
-    return "\n".join(lines)
-
-
-def _format_pickings(rows, title: str) -> str:
-    if not rows:
-        return f"Không có {title} nào phù hợp."
-    lines = [f"{len(rows)} {title}:\n"]
-    for r in rows:
-        partner = r["partner_id"][1] if r.get("partner_id") else "N/A"
-        sched = (r.get("scheduled_date") or "N/A")[:16]
-        lines.append(
-            f"  {r['name']} | {partner} | Dự kiến: {sched} "
-            f"| Trạng thái: {r['state']} | Nguồn: {r.get('origin') or '-'}")
-    return "\n".join(lines)
-
-
-_PICKING_FIELDS = ["name", "partner_id", "scheduled_date", "state", "origin"]
-
-
-@mcp.tool()
-def get_deliveries(state: str | None = None, partner_name: str | None = None,
-                   limit: int = 50) -> str:
-    """Phiếu giao hàng (stock.picking, outgoing).
-
-    Args:
-        state: draft|waiting|confirmed|assigned|done|cancel (bỏ trống = tất cả).
-        partner_name: Lọc theo tên khách (tìm gần đúng).
-        limit: Số dòng tối đa.
-    """
-    domain = [["picking_type_code", "=", "outgoing"]]
-    if state:
-        domain.append(["state", "=", state])
-    if partner_name:
-        domain.append(["partner_id.name", "ilike", partner_name])
-    rows = odoo("stock.picking", "search_read", [domain],
-                {"fields": _PICKING_FIELDS, "limit": limit,
-                 "order": "scheduled_date desc"})
-    return _format_pickings(rows, "phiếu giao hàng")
-
-
-@mcp.tool()
-def get_receipts(state: str | None = None, limit: int = 50) -> str:
-    """Phiếu nhận hàng (stock.picking, incoming).
-
-    Args:
-        state: draft|waiting|confirmed|assigned|done|cancel (bỏ trống = tất cả).
-        limit: Số dòng tối đa.
-    """
-    domain = [["picking_type_code", "=", "incoming"]]
-    if state:
-        domain.append(["state", "=", state])
-    rows = odoo("stock.picking", "search_read", [domain],
-                {"fields": _PICKING_FIELDS, "limit": limit,
-                 "order": "scheduled_date desc"})
-    return _format_pickings(rows, "phiếu nhận hàng")
-
-
-@mcp.tool()
-def get_internal_transfers(state: str | None = None, limit: int = 50) -> str:
-    """Phiếu điều chuyển nội bộ (stock.picking, internal).
-
-    Args:
-        state: draft|waiting|confirmed|assigned|done|cancel (bỏ trống = tất cả).
-        limit: Số dòng tối đa.
-    """
-    domain = [["picking_type_code", "=", "internal"]]
-    if state:
-        domain.append(["state", "=", state])
-    rows = odoo("stock.picking", "search_read", [domain],
-                {"fields": _PICKING_FIELDS, "limit": limit,
-                 "order": "scheduled_date desc"})
-    return _format_pickings(rows, "phiếu điều chuyển nội bộ")
-
-
-@mcp.tool()
-def search_lots(product_name: str | None = None, limit: int = 50) -> str:
-    """Tra cứu Lô / Số sê-ri (stock.lot) và tồn hiện tại.
-
-    Args:
-        product_name: Lọc theo tên sản phẩm (tìm gần đúng).
-        limit: Số dòng tối đa.
-    """
-    domain: list = []
-    if product_name:
-        domain.append(["product_id.name", "ilike", product_name])
-    rows = odoo("stock.lot", "search_read", [domain],
-                {"fields": ["name", "product_id", "product_qty"],
-                 "limit": limit, "order": "product_id asc"})
-    if not rows:
-        return "Không tìm thấy lô/sê-ri nào phù hợp."
-    lines = [f"{len(rows)} lô/sê-ri:\n"]
-    for r in rows:
-        product = r["product_id"][1] if r.get("product_id") else "N/A"
-        lines.append(f"  {r['name']:20s} | SP: {product:35s} | Tồn: {r['product_qty']:.1f}")
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def search_products(name: str | None = None, limit: int = 50) -> str:
-    """Tra cứu sản phẩm (product.product): giá bán, giá vốn, tồn kho.
-
-    Args:
-        name: Tìm theo tên hoặc mã nội bộ (tìm gần đúng).
-        limit: Số dòng tối đa.
-    """
-    domain: list = []
-    if name:
-        domain = ["|", ["name", "ilike", name], ["default_code", "ilike", name]]
-    rows = odoo("product.product", "search_read", [domain],
-                {"fields": ["name", "default_code", "list_price",
-                            "standard_price", "qty_available", "uom_id"],
-                 "limit": limit, "order": "name asc"})
-    if not rows:
-        return "Không tìm thấy sản phẩm nào phù hợp."
-    lines = [f"{len(rows)} sản phẩm:\n"]
-    for r in rows:
-        uom = r["uom_id"][1] if r.get("uom_id") else ""
-        lines.append(
-            f"  [{r.get('default_code') or '-'}] {r['name']:35s} "
-            f"| Giá bán: {r['list_price']:,.0f} | Giá vốn: {r['standard_price']:,.0f} "
-            f"| Tồn: {r['qty_available']:.1f} {uom}")
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def get_sale_order_detail(order_ref: str) -> str:
-    """Chi tiết dòng sản phẩm của một đơn bán (sale.order).
-
-    Args:
-        order_ref: Mã đơn bán, ví dụ "S00012".
-    """
-    orders = odoo("sale.order", "search_read", [[["name", "=", order_ref]]],
-                  {"fields": ["id", "name", "partner_id", "amount_total"], "limit": 2})
-    if not orders:
-        return f"Không tìm thấy đơn '{order_ref}'."
-    if len(orders) > 1:
-        return f"Có nhiều đơn tên '{order_ref}'. Vui lòng nêu rõ hơn."
-    o = orders[0]
-    rows = odoo("sale.order.line", "search_read", [[["order_id", "=", o["id"]]]],
-                {"fields": ["product_id", "product_uom_qty", "price_unit",
-                            "price_subtotal"], "order": "id asc"})
-    partner = o["partner_id"][1] if o["partner_id"] else "N/A"
-    out = [f"Đơn {o['name']} | Khách: {partner} | Tổng: {o['amount_total']:,.0f}\n"]
-    if not rows:
-        out.append("  (không có dòng sản phẩm)")
-    for ln in rows:
-        product = ln["product_id"][1] if ln.get("product_id") else "N/A"
-        out.append(
-            f"  {product:35s} | SL: {ln['product_uom_qty']:.1f} "
-            f"| Đơn giá: {ln['price_unit']:,.0f} | Thành tiền: {ln['price_subtotal']:,.0f}")
-    return "\n".join(out)
-
-
-@mcp.tool()
-def get_purchase_order_detail(order_ref: str) -> str:
-    """Chi tiết dòng sản phẩm của một đơn mua (purchase.order).
-
-    Args:
-        order_ref: Mã đơn mua, ví dụ "P00003".
-    """
-    orders = odoo("purchase.order", "search_read", [[["name", "=", order_ref]]],
-                  {"fields": ["id", "name", "partner_id", "amount_total"], "limit": 2})
-    if not orders:
-        return f"Không tìm thấy đơn '{order_ref}'."
-    if len(orders) > 1:
-        return f"Có nhiều đơn tên '{order_ref}'. Vui lòng nêu rõ hơn."
-    o = orders[0]
-    rows = odoo("purchase.order.line", "search_read", [[["order_id", "=", o["id"]]]],
-                {"fields": ["product_id", "product_qty", "price_unit",
-                            "price_subtotal"], "order": "id asc"})
-    partner = o["partner_id"][1] if o["partner_id"] else "N/A"
-    out = [f"Đơn {o['name']} | NCC: {partner} | Tổng: {o['amount_total']:,.0f}\n"]
-    if not rows:
-        out.append("  (không có dòng sản phẩm)")
-    for ln in rows:
-        product = ln["product_id"][1] if ln.get("product_id") else "N/A"
-        out.append(
-            f"  {product:35s} | SL: {ln['product_qty']:.1f} "
-            f"| Đơn giá: {ln['price_unit']:,.0f} | Thành tiền: {ln['price_subtotal']:,.0f}")
-    return "\n".join(out)
-
-
-@mcp.tool()
-def search_leads(type: str | None = None, salesperson: str | None = None,
-                 limit: int = 50) -> str:
-    """Tra cứu Lead / Cơ hội (crm.lead).
-
-    Args:
-        type: "lead" hoặc "opportunity" (bỏ trống = cả hai).
-        salesperson: Lọc theo tên nhân viên phụ trách (tìm gần đúng).
-        limit: Số dòng tối đa.
-    """
-    domain: list = []
-    if type:
-        domain.append(["type", "=", type])
-    if salesperson:
-        domain.append(["user_id.name", "ilike", salesperson])
-    rows = odoo("crm.lead", "search_read", [domain], {
-        "fields": ["name", "contact_name", "email_from", "stage_id",
-                   "expected_revenue", "probability", "user_id", "type"],
-        "limit": limit, "order": "expected_revenue desc",
-    })
-    if not rows:
-        return "Không tìm thấy lead/cơ hội nào phù hợp."
-    lines = [f"{len(rows)} lead/cơ hội:\n"]
-    for r in rows:
-        stage = r["stage_id"][1] if r.get("stage_id") else "N/A"
-        sp = r["user_id"][1] if r.get("user_id") else "N/A"
-        lines.append(
-            f"  {r['name']} | LH: {r.get('contact_name') or '-'} | GĐ: {stage} "
-            f"| Dự kiến: {r['expected_revenue']:,.0f} ({r['probability']:.0f}%) | NV: {sp}")
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def get_manufacturing_orders(state: str | None = None, limit: int = 50) -> str:
-    """Lệnh sản xuất (mrp.production).
-
-    Args:
-        state: draft|confirmed|progress|to_close|done|cancel (bỏ trống = tất cả).
-        limit: Số dòng tối đa.
-    """
-    domain: list = []
-    if state:
-        domain.append(["state", "=", state])
-    rows = odoo("mrp.production", "search_read", [domain], {
-        "fields": ["name", "product_id", "product_qty", "state", "date_start"],
-        "limit": limit, "order": "date_start desc",
-    })
-    if not rows:
-        return "Không có lệnh sản xuất nào phù hợp."
-    lines = [f"{len(rows)} lệnh sản xuất:\n"]
-    for r in rows:
-        product = r["product_id"][1] if r.get("product_id") else "N/A"
-        start = (r.get("date_start") or "N/A")[:16]
-        lines.append(
-            f"  {r['name']} | SP: {product:30s} | SL: {r['product_qty']:.1f} "
-            f"| Trạng thái: {r['state']} | Bắt đầu: {start}")
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def get_bom(product_name: str) -> str:
-    """Định mức nguyên vật liệu (BOM) của một sản phẩm.
-
-    Args:
-        product_name: Tên sản phẩm cần xem BOM (tìm gần đúng).
-    """
-    boms = odoo("mrp.bom", "search_read",
-                [[["product_tmpl_id.name", "ilike", product_name]]],
-                {"fields": ["id", "code", "product_tmpl_id", "product_qty"], "limit": 5})
-    if not boms:
-        return f"Không tìm thấy BOM cho '{product_name}'."
-    if len(boms) > 1:
-        names = ", ".join((b["product_tmpl_id"][1] if b["product_tmpl_id"] else "?")
-                          for b in boms)
-        return f"Có nhiều BOM khớp '{product_name}': {names}. Vui lòng nêu rõ hơn."
-    b = boms[0]
-    comps = odoo("mrp.bom.line", "search_read", [[["bom_id", "=", b["id"]]]],
-                 {"fields": ["product_id", "product_qty"], "order": "id asc"})
-    product = b["product_tmpl_id"][1] if b["product_tmpl_id"] else "N/A"
-    out = [f"BOM: {product} (tạo {b['product_qty']:.0f} đơn vị)\n  Thành phần:"]
-    if not comps:
-        out.append("    (không có thành phần)")
-    for c in comps:
-        cp = c["product_id"][1] if c.get("product_id") else "N/A"
-        out.append(f"    - {cp:35s} x {c['product_qty']:.2f}")
-    return "\n".join(out)
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────

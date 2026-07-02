@@ -14,6 +14,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from .graph import build_graph
 from .confirmation import CONFIRM, UNCLEAR, classify_confirmation
+from .disambiguation import parse_selection
 
 LITELLM_URL  = os.environ.get("LITELLM_URL", "http://localhost:4000/v1")
 LITELLM_KEY  = os.environ.get("LITELLM_MASTER_KEY", "")
@@ -51,6 +52,51 @@ def _pending_expiry(snapshot) -> float | None:
             if isinstance(value, dict) and "expires_at" in value:
                 return value["expires_at"]
     return None
+
+
+def _is_parked(snapshot) -> bool:
+    """Is the thread waiting on the user (a pending interrupt)? Check the pending
+    interrupt directly, not just `snapshot.next`: after resuming one interrupt and
+    hitting a SECOND in the same node (disambiguation → confirm), LangGraph leaves
+    `snapshot.next` empty while the confirm interrupt is still pending — so relying
+    on `next` alone drops the user's confirm into the fresh-request path."""
+    return bool(_pending_question(snapshot)) or bool(getattr(snapshot, "next", None))
+
+
+def _pending_kind(snapshot) -> str | None:
+    """Kind of the interrupt a parked thread waits on: 'confirm'|'disambiguation'."""
+    for task in getattr(snapshot, "tasks", ()) or ():
+        for it in getattr(task, "interrupts", ()) or ():
+            value = getattr(it, "value", None)
+            if isinstance(value, dict) and value.get("question"):
+                return value.get("kind", "confirm")
+    return None
+
+
+def _pending_options(snapshot) -> list:
+    """Candidate options of a parked disambiguation interrupt (else [])."""
+    for task in getattr(snapshot, "tasks", ()) or ():
+        for it in getattr(task, "interrupts", ()) or ():
+            value = getattr(it, "value", None)
+            if isinstance(value, dict) and value.get("kind") == "disambiguation":
+                return value.get("options") or []
+    return []
+
+
+async def _decide_resume(kind, options, question, reply, llm):
+    """Turn the user's reply into a resume Command, or a re-ask string.
+
+    disambiguation → parse the selection (deterministic) → resume the chosen id;
+    confirm (or unspecified) → classify yes/no → resume a bool. Ambiguous → re-ask."""
+    if kind == "disambiguation":
+        chosen = parse_selection(reply, options)
+        if chosen is None:
+            return question or "Vui lòng chọn một mục trong danh sách."
+        return Command(resume=chosen)
+    verdict = await classify_confirmation(reply, llm)
+    if verdict == UNCLEAR:
+        return question or "Bạn xác nhận thực hiện thao tác này? (có / không)"
+    return Command(resume=verdict == CONFIRM)
 
 
 class ERPAgent:
@@ -99,7 +145,7 @@ class ERPAgent:
         # If the thread is parked at a write-confirmation interrupt, this turn is
         # the user's answer — classify it and resume instead of starting over.
         snapshot = await self.graph.aget_state(config)
-        if getattr(snapshot, "next", None):
+        if _is_parked(snapshot):
             expires_at = _pending_expiry(snapshot)
             if expires_at is not None and time.time() > expires_at:
                 # Stale confirmation: discard it (resume=False is a no-op write,
@@ -108,14 +154,13 @@ class ERPAgent:
                 result = await self._invoke_fresh(messages, config)
             else:
                 reply = messages[-1]["content"]
-                verdict = await classify_confirmation(reply, self._llm)
-                if verdict == UNCLEAR:
-                    # Don't guess on an ambiguous reply: re-ask, leave thread parked.
-                    question = _pending_question(snapshot)
-                    return question or "Bạn xác nhận thực hiện thao tác này? (có / không)"
-                result = await self.graph.ainvoke(
-                    Command(resume=verdict == CONFIRM), config=config
-                )
+                decision = await _decide_resume(
+                    _pending_kind(snapshot), _pending_options(snapshot),
+                    _pending_question(snapshot), reply, self._llm)
+                if isinstance(decision, str):
+                    # Unclear reply: re-ask, leave the thread parked.
+                    return decision
+                result = await self.graph.ainvoke(decision, config=config)
         else:
             result = await self._invoke_fresh(messages, config)
 

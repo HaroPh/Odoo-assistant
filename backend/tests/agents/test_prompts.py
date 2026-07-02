@@ -32,7 +32,9 @@ def test_planner_prompt_advertises_create_quotation():
 
 def test_planner_prompt_advertises_create_rfq():
     assert "create_rfq" in WRITE_PLANNER_PROMPT
-    assert "supplier_name" in WRITE_PLANNER_PROMPT
+    # the generalized order coordinator reads args["partner_name"] for purchase too,
+    # so the RFQ contract must advertise partner_name (not supplier_name).
+    assert "create_rfq(partner_name" in WRITE_PLANNER_PROMPT
 
 
 def test_planner_prompt_advertises_inventory_adjustment():
