@@ -5,6 +5,7 @@ Reads moved to backend/src/erp_query/ (Tasks 1–8).
 Transport: HTTP/SSE tại port 8001
 Connect:   http://mcp-odoo:8001/sse  (từ backend container)
 """
+import json
 import os
 import re
 import sys
@@ -216,6 +217,15 @@ def resolve_unique(rows, kind_label, describe, hint=""):
         msg += f"\n{hint}"
     return None, msg
 
+def envelope(ok: bool, display: str, *, ref=None, model=None,
+             res_id=None, state=None) -> str:
+    """JSON-string result for the invoice-chain tools (create_quotation,
+    confirm_sale_order, create_invoice_from_order, post_invoice). The backend
+    parses this to drive the write-continuation menu; `display` is the
+    user-facing Vietnamese sentence. Non-chain tools keep plain strings."""
+    return json.dumps({"ok": ok, "ref": ref, "model": model, "res_id": res_id,
+                       "state": state, "display": display}, ensure_ascii=False)
+
 # ─── TOOLS ───────────────────────────────────────────────────────────────────
 
 @mcp.tool()
@@ -231,19 +241,20 @@ def confirm_sale_order(order_ref: str) -> str:
                 [[["name", "=", order_ref]]],
                 {"fields": ["id", "name", "state"], "limit": 2})
     if not rows:
-        return f"Không tìm thấy đơn '{order_ref}'."
+        return envelope(False, f"Không tìm thấy đơn '{order_ref}'.")
     if len(rows) > 1:
-        return f"Có nhiều đơn tên '{order_ref}'. Vui lòng nêu rõ hơn."
+        return envelope(False, f"Có nhiều đơn tên '{order_ref}'. Vui lòng nêu rõ hơn.")
 
     order = rows[0]
     name, state = order["name"], order["state"]
     if state in ("sale", "done"):
-        return f"Đơn {name} đã được xác nhận rồi."
+        return envelope(False, f"Đơn {name} đã được xác nhận rồi.")
     if state == "cancel":
-        return f"Đơn {name} đã bị hủy, không thể xác nhận."
+        return envelope(False, f"Đơn {name} đã bị hủy, không thể xác nhận.")
 
     odoo("sale.order", "action_confirm", [[order["id"]]])
-    return f"Đã xác nhận đơn {name}."
+    return envelope(True, f"Đã xác nhận đơn {name}.",
+                    ref=name, model="sale.order", res_id=order["id"], state="sale")
 
 
 @mcp.tool()
@@ -398,18 +409,18 @@ def create_quotation(partner_name: str = "", lines: list | None = None,
     """
     lines = lines or []
     if not lines:
-        return "Vui lòng cho biết sản phẩm và số lượng cần báo giá."
+        return envelope(False, "Vui lòng cho biết sản phẩm và số lượng cần báo giá.")
 
     if partner_id:
         prows = odoo("res.partner", "read", [[partner_id]], {"fields": ["id", "name"]})
         if not prows:
-            return f"Không tìm thấy khách hàng ID {partner_id}."
+            return envelope(False, f"Không tìm thấy khách hàng ID {partner_id}.")
         partner = prows[0]
     else:
         partner, msg = _resolve_partner(partner_name, "khách hàng",
                                         "Vui lòng nêu rõ tên khách hàng.")
         if msg:
-            return msg
+            return envelope(False, msg)
 
     order_line = []
     for line in lines:
@@ -420,7 +431,7 @@ def create_quotation(partner_name: str = "", lines: list | None = None,
             continue
         prod, pmsg = _resolve_product(line["product"], "sale_ok")
         if pmsg:
-            return pmsg
+            return envelope(False, pmsg)
         order_line.append((0, 0, {"product_id": prod["id"],
                                   "product_uom_qty": line["qty"]}))
 
@@ -428,7 +439,9 @@ def create_quotation(partner_name: str = "", lines: list | None = None,
                [{"partner_id": partner["id"], "order_line": order_line}])
     so = odoo("sale.order", "read", [[sid]], {"fields": ["name"]})
     name = so[0]["name"] if so else "?"
-    return f"Đã tạo báo giá {name} cho {partner['name']} ({len(lines)} dòng)."
+    return envelope(True,
+                    f"Đã tạo báo giá {name} (nháp) cho {partner['name']} ({len(lines)} dòng).",
+                    ref=name, model="sale.order", res_id=sid, state="draft")
 
 
 @mcp.tool()

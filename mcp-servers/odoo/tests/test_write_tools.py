@@ -12,6 +12,7 @@ def patch_odoo(monkeypatch, by_model, confirm_capture=None):
         calls.append({"model": model, "method": method, "args": args})
         if confirm_capture is not None and method in (
             "button_confirm", "action_post", "button_validate", "create",
+            "action_confirm",
         ):
             confirm_capture.append((model, method, args))
             return True
@@ -526,3 +527,63 @@ def test_inventory_adjustment_conflict_dict_safe_message(monkeypatch):
     monkeypatch.setattr(server, "odoo", fake_odoo)
     out = fn("inventory_adjustment")(480, "Large Cabinet")
     assert "xung đột" in out.lower()
+
+
+# ── envelope contract (chain tools) ──────────────────────────────────────────
+import json as _json
+
+
+def _env(out):
+    data = _json.loads(out)
+    assert set(data) == {"ok", "ref", "model", "res_id", "state", "display"}
+    return data
+
+
+def test_create_quotation_success_returns_envelope(monkeypatch):
+    def fake_odoo(model, method, args, kwargs=None, tool_name=None):
+        if method == "create":
+            return 99
+        if model == "res.partner":
+            return [{"id": 7, "name": "Azure Interior", "email": "a@x.com"}]
+        if model == "product.product":
+            return [{"id": 11, "name": "Bàn gỗ", "default_code": "X",
+                     "list_price": 50.0}]
+        if model == "sale.order" and method == "read":
+            return [{"name": "S00021"}]
+        return []
+    monkeypatch.setattr(server, "odoo", fake_odoo)
+    data = _env(fn("create_quotation")("Azure", [{"product": "bàn gỗ", "qty": 10}]))
+    assert data["ok"] is True
+    assert data["ref"] == "S00021" and data["model"] == "sale.order"
+    assert data["res_id"] == 99 and data["state"] == "draft"
+    assert "S00021" in data["display"] and "nháp" in data["display"]
+
+
+def test_create_quotation_error_envelope_ok_false(monkeypatch):
+    patch_odoo(monkeypatch, {("res.partner", "search_read"): []})
+    data = _env(fn("create_quotation")("Nobody", [{"product": "bàn", "qty": 2}]))
+    assert data["ok"] is False and data["res_id"] is None
+    assert "không tìm thấy" in data["display"].lower()
+
+
+def test_confirm_so_success_returns_envelope(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch,
+               {"sale.order": [{"id": 5, "name": "S00005", "state": "draft"}]},
+               confirm_capture=cap)
+    data = _env(fn("confirm_sale_order")("S00005"))
+    assert data["ok"] is True and data["ref"] == "S00005"
+    assert data["model"] == "sale.order" and data["res_id"] == 5
+    assert data["state"] == "sale"
+    assert "đã xác nhận" in data["display"].lower()
+
+
+def test_confirm_so_already_confirmed_ok_false(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch,
+               {"sale.order": [{"id": 6, "name": "S00006", "state": "sale"}]},
+               confirm_capture=cap)
+    data = _env(fn("confirm_sale_order")("S00006"))
+    assert data["ok"] is False
+    assert "đã được xác nhận" in data["display"].lower()
+    assert cap == []
