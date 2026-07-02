@@ -88,3 +88,24 @@ def test_build_graph_registers_all_coordinator_nodes():
 def test_planner_returns_pending_for_each_coordinated_tool():
     from backend.src.agents.write_registry import COORDINATED_TOOLS
     assert {"create_quotation", "create_rfq", "inventory_adjustment"} <= COORDINATED_TOOLS
+
+
+def test_build_graph_registers_write_continuation():
+    graph = build_graph(MagicMock(), tools=[], checkpointer=None)
+    assert "write_continuation" in graph.get_graph().nodes
+
+
+def test_all_writes_route_through_continuation():
+    graph = build_graph(MagicMock(), tools=[], checkpointer=None)
+    edges = [(e.source, e.target) for e in graph.get_graph().edges]
+    assert ("erp_write_executor", "write_continuation") in edges
+    for node in ("create_order", "create_rfq", "inventory_adjust"):
+        assert (node, "write_continuation") in edges
+    assert ("erp_write_executor", "__end__") not in edges
+
+
+def test_continuation_loops_back_to_executor():
+    graph = build_graph(MagicMock(), tools=[], checkpointer=None)
+    edges = [(e.source, e.target) for e in graph.get_graph().edges]
+    assert ("write_continuation", "erp_write_executor") in edges
+    assert ("write_continuation", "__end__") in edges

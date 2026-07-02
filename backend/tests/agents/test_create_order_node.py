@@ -130,3 +130,41 @@ async def test_write_disabled_gate(monkeypatch):
     cfg = {"configurable": {"thread_id": "t5"}}
     res = await graph.ainvoke(_state([{"product": "Tủ", "qty": 1}]), cfg)
     assert "chưa được kích hoạt" in res["messages"][-1].content
+
+
+def _fake_envelope_tool(recorder):
+    import json as _json
+    t = MagicMock()
+    t.name = "create_quotation"
+
+    async def ainvoke(args):
+        recorder["args"] = args
+        return _json.dumps({"ok": True, "ref": "S00099", "model": "sale.order",
+                            "res_id": 99, "state": "draft",
+                            "display": "Đã tạo báo giá S00099 (nháp) cho Azur (1 dòng)."},
+                           ensure_ascii=False)
+
+    t.ainvoke = ainvoke
+    return t
+
+
+@pytest.mark.asyncio
+async def test_envelope_result_sets_last_write_not_raw_json(monkeypatch):
+    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(co.sales, "find_customer",
+                        lambda *a, **k: _ok([{"id": 41, "name": "Azur", "score": 1}], False))
+    monkeypatch.setattr(co.inventory, "find_product",
+                        lambda *a, **k: _ok([{"id": 552, "name": "Tủ", "score": 1}], False))
+    monkeypatch.setattr(co.sales, "get_product_price",
+                        lambda *a, **k: {"status": "success",
+                                         "data": {"price": 100000.0}, "display": "x"})
+    rec = {}
+    graph = _graph(co.make_create_order_node(MagicMock(), [_fake_envelope_tool(rec)]))
+    cfg = {"configurable": {"thread_id": "t-env"}}
+    await graph.ainvoke(_state([{"product": "Tủ", "qty": 3}]), cfg)
+    res = await graph.ainvoke(Command(resume=True), cfg)
+    final = res["messages"][-1].content
+    assert final == "Đã tạo báo giá S00099 (nháp) cho Azur (1 dòng)."   # not raw JSON
+    assert res["last_write"]["tool"] == "create_quotation"
+    assert res["last_write"]["ref"] == "S00099" and res["last_write"]["res_id"] == 99
+    assert res["pending_action"] is None

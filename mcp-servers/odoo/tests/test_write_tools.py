@@ -12,6 +12,7 @@ def patch_odoo(monkeypatch, by_model, confirm_capture=None):
         calls.append({"model": model, "method": method, "args": args})
         if confirm_capture is not None and method in (
             "button_confirm", "action_post", "button_validate", "create",
+            "action_confirm",
         ):
             confirm_capture.append((model, method, args))
             return True
@@ -526,3 +527,118 @@ def test_inventory_adjustment_conflict_dict_safe_message(monkeypatch):
     monkeypatch.setattr(server, "odoo", fake_odoo)
     out = fn("inventory_adjustment")(480, "Large Cabinet")
     assert "xung đột" in out.lower()
+
+
+# ── envelope contract (chain tools) ──────────────────────────────────────────
+import json as _json
+
+
+def _env(out):
+    data = _json.loads(out)
+    assert set(data) == {"ok", "ref", "model", "res_id", "state", "display"}
+    return data
+
+
+def test_create_quotation_success_returns_envelope(monkeypatch):
+    def fake_odoo(model, method, args, kwargs=None, tool_name=None):
+        if method == "create":
+            return 99
+        if model == "res.partner":
+            return [{"id": 7, "name": "Azure Interior", "email": "a@x.com"}]
+        if model == "product.product":
+            return [{"id": 11, "name": "Bàn gỗ", "default_code": "X",
+                     "list_price": 50.0}]
+        if model == "sale.order" and method == "read":
+            return [{"name": "S00021"}]
+        return []
+    monkeypatch.setattr(server, "odoo", fake_odoo)
+    data = _env(fn("create_quotation")("Azure", [{"product": "bàn gỗ", "qty": 10}]))
+    assert data["ok"] is True
+    assert data["ref"] == "S00021" and data["model"] == "sale.order"
+    assert data["res_id"] == 99 and data["state"] == "draft"
+    assert "S00021" in data["display"] and "nháp" in data["display"]
+
+
+def test_create_quotation_error_envelope_ok_false(monkeypatch):
+    patch_odoo(monkeypatch, {("res.partner", "search_read"): []})
+    data = _env(fn("create_quotation")("Nobody", [{"product": "bàn", "qty": 2}]))
+    assert data["ok"] is False and data["res_id"] is None
+    assert "không tìm thấy" in data["display"].lower()
+
+
+def test_confirm_so_success_returns_envelope(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch,
+               {"sale.order": [{"id": 5, "name": "S00005", "state": "draft"}]},
+               confirm_capture=cap)
+    data = _env(fn("confirm_sale_order")("S00005"))
+    assert data["ok"] is True and data["ref"] == "S00005"
+    assert data["model"] == "sale.order" and data["res_id"] == 5
+    assert data["state"] == "sale"
+    assert "đã xác nhận" in data["display"].lower()
+
+
+def test_confirm_so_already_confirmed_ok_false(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch,
+               {"sale.order": [{"id": 6, "name": "S00006", "state": "sale"}]},
+               confirm_capture=cap)
+    data = _env(fn("confirm_sale_order")("S00006"))
+    assert data["ok"] is False
+    assert "đã được xác nhận" in data["display"].lower()
+    assert cap == []
+
+
+# ── post_invoice: id path + envelope ─────────────────────────────────────────
+
+def test_post_invoice_by_id_posts_draft(monkeypatch):
+    cap = []
+    calls = patch_odoo(monkeypatch, {
+        ("account.move", "search_read"): [
+            {"id": 61, "name": False, "state": "draft", "partner_id": [7, "Azure"]}],
+        ("account.move", "read"): [{"name": "INV/2026/00032", "partner_id": [7, "Azure"]}],
+    }, confirm_capture=cap)
+    data = _env(fn("post_invoice")(invoice_id=61))
+    assert data["ok"] is True and data["ref"] == "INV/2026/00032"
+    assert data["model"] == "account.move" and data["res_id"] == 61
+    assert data["state"] == "posted"
+    assert ("account.move", "action_post", [[61]]) in cap
+    assert ["id", "=", 61] in calls[0]["args"][0]      # id-filtered domain
+    assert ["move_type", "in", ["out_invoice", "in_invoice"]] in calls[0]["args"][0]
+
+
+def test_post_invoice_by_id_already_posted(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch, {("account.move", "search_read"): [
+        {"id": 62, "name": "INV/2026/00031", "state": "posted",
+         "partner_id": [7, "Azure"]}]}, confirm_capture=cap)
+    data = _env(fn("post_invoice")(invoice_id=62))
+    assert data["ok"] is False
+    assert "đã phát hành" in data["display"].lower()
+    assert cap == []
+
+
+def test_post_invoice_by_id_not_found(monkeypatch):
+    patch_odoo(monkeypatch, {("account.move", "search_read"): []})
+    data = _env(fn("post_invoice")(invoice_id=999))
+    assert data["ok"] is False
+    assert "không tìm thấy" in data["display"].lower()
+
+
+def test_post_invoice_no_args_asks(monkeypatch):
+    patch_odoo(monkeypatch, {})
+    data = _env(fn("post_invoice")())
+    assert data["ok"] is False
+
+
+def test_post_invoice_name_path_success_envelope(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch, {
+        ("account.move", "search_read"): [
+            {"id": 58, "partner_id": [15, "Azure Interior"], "amount_total": 100.0,
+             "invoice_date": "2026-06-27", "move_type": "out_invoice"}],
+        ("account.move", "read"): [{"name": "INV/2026/00012"}],
+    }, confirm_capture=cap)
+    data = _env(fn("post_invoice")("Azure"))
+    assert data["ok"] is True and data["ref"] == "INV/2026/00012"
+    assert data["res_id"] == 58 and data["state"] == "posted"

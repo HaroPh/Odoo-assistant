@@ -9,3 +9,5 @@ class ERPAgentState(TypedDict):
     intent: str | None            # "erp_read" | "erp_write" | "rag" | "unknown"
     pending_action: dict | None   # {"tool": str, "args": dict, "summary": str}
     confirmed: bool | None        # None=not asked, True=yes, False=no
+    last_write: dict | None       # last write result handle:
+                                  # {"tool", "ok", "ref", "model", "res_id", "state", "display"}

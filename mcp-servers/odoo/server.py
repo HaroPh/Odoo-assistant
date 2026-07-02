@@ -5,6 +5,7 @@ Reads moved to backend/src/erp_query/ (Tasks 1–8).
 Transport: HTTP/SSE tại port 8001
 Connect:   http://mcp-odoo:8001/sse  (từ backend container)
 """
+import json
 import os
 import re
 import sys
@@ -40,6 +41,7 @@ ODOO_METHOD_OPERATION_MAP = {
     "default_get": "read", "name_get": "read", "get_metadata": "read",
     # CREATE — Phase 3: cần confirmation
     "create": "create", "copy": "create", "name_create": "create",
+    "create_invoices": "create",
     # WRITE — Phase 3: cần confirmation
     "write": "write", "toggle_active": "write",
     "action_archive": "write", "message_post": "write",
@@ -216,6 +218,15 @@ def resolve_unique(rows, kind_label, describe, hint=""):
         msg += f"\n{hint}"
     return None, msg
 
+def envelope(ok: bool, display: str, *, ref=None, model=None,
+             res_id=None, state=None) -> str:
+    """JSON-string result for the invoice-chain tools (create_quotation,
+    confirm_sale_order, create_invoice_from_order, post_invoice). The backend
+    parses this to drive the write-continuation menu; `display` is the
+    user-facing Vietnamese sentence. Non-chain tools keep plain strings."""
+    return json.dumps({"ok": ok, "ref": ref, "model": model, "res_id": res_id,
+                       "state": state, "display": display}, ensure_ascii=False)
+
 # ─── TOOLS ───────────────────────────────────────────────────────────────────
 
 @mcp.tool()
@@ -231,19 +242,20 @@ def confirm_sale_order(order_ref: str) -> str:
                 [[["name", "=", order_ref]]],
                 {"fields": ["id", "name", "state"], "limit": 2})
     if not rows:
-        return f"Không tìm thấy đơn '{order_ref}'."
+        return envelope(False, f"Không tìm thấy đơn '{order_ref}'.")
     if len(rows) > 1:
-        return f"Có nhiều đơn tên '{order_ref}'. Vui lòng nêu rõ hơn."
+        return envelope(False, f"Có nhiều đơn tên '{order_ref}'. Vui lòng nêu rõ hơn.")
 
     order = rows[0]
     name, state = order["name"], order["state"]
     if state in ("sale", "done"):
-        return f"Đơn {name} đã được xác nhận rồi."
+        return envelope(False, f"Đơn {name} đã được xác nhận rồi.")
     if state == "cancel":
-        return f"Đơn {name} đã bị hủy, không thể xác nhận."
+        return envelope(False, f"Đơn {name} đã bị hủy, không thể xác nhận.")
 
     odoo("sale.order", "action_confirm", [[order["id"]]])
-    return f"Đã xác nhận đơn {name}."
+    return envelope(True, f"Đã xác nhận đơn {name}.",
+                    ref=name, model="sale.order", res_id=order["id"], state="sale")
 
 
 @mcp.tool()
@@ -274,8 +286,8 @@ def confirm_purchase_order(order_ref: str) -> str:
 
 
 @mcp.tool()
-def post_invoice(partner_name: str, amount: float | None = None,
-                 invoice_date: str | None = None) -> str:
+def post_invoice(partner_name: str = "", amount: float | None = None,
+                 invoice_date: str | None = None, invoice_id: int = 0) -> str:
     """Phát hành hóa đơn nháp (account.move draft → posted) của một khách hàng.
     Áp dụng cho cả hóa đơn bán và hóa đơn mua. Hóa đơn nháp CHƯA có số (số được
     cấp khi phát hành), nên tra theo tên khách. Nếu khách có nhiều hóa đơn nháp,
@@ -286,7 +298,35 @@ def post_invoice(partner_name: str, amount: float | None = None,
         partner_name: Tên khách hàng/nhà cung cấp của hóa đơn nháp (tìm gần đúng).
         amount: Tổng tiền hóa đơn — dùng để phân biệt khi có nhiều nháp.
         invoice_date: Ngày hóa đơn (YYYY-MM-DD) — dùng để phân biệt.
+        invoice_id: ID hóa đơn đã biết (ưu tiên hơn partner_name — đường nội bộ).
     """
+    if invoice_id:
+        rows = odoo("account.move", "search_read",
+                    [[["id", "=", invoice_id],
+                      ["move_type", "in", ["out_invoice", "in_invoice"]]]],
+                    {"fields": ["id", "name", "state", "partner_id"], "limit": 1})
+        if not rows:
+            return envelope(False, f"Không tìm thấy hóa đơn ID {invoice_id}.")
+        mv = rows[0]
+        if mv["state"] == "posted":
+            return envelope(False, f"Hóa đơn {mv['name']} đã phát hành rồi.")
+        if mv["state"] != "draft":
+            return envelope(False,
+                            f"Hóa đơn ID {invoice_id} không ở trạng thái nháp.")
+        odoo("account.move", "action_post", [[invoice_id]])
+        posted = odoo("account.move", "read", [[invoice_id]],
+                      {"fields": ["name", "partner_id"]})
+        name = posted[0]["name"] if posted else "?"
+        partner = (posted[0]["partner_id"][1]
+                   if posted and posted[0].get("partner_id") else "?")
+        return envelope(True, f"Đã phát hành hóa đơn {name} cho {partner}.",
+                        ref=name, model="account.move", res_id=invoice_id,
+                        state="posted")
+
+    if not partner_name:
+        return envelope(False,
+                        "Vui lòng cho biết khách hàng (hoặc ID) của hóa đơn nháp.")
+
     domain = [["move_type", "in", ["out_invoice", "in_invoice"]],
               ["state", "=", "draft"],
               ["partner_id.name", "ilike", partner_name]]
@@ -306,13 +346,70 @@ def post_invoice(partner_name: str, amount: float | None = None,
                             f"— {r.get('invoice_date') or '—'}"),
         hint="Vui lòng nêu rõ số tiền hoặc ngày.")
     if msg:
-        return msg
+        return envelope(False, msg)
 
     partner = row["partner_id"][1] if row["partner_id"] else partner_name
     odoo("account.move", "action_post", [[row["id"]]])
     posted = odoo("account.move", "read", [[row["id"]]], {"fields": ["name"]})
     name = posted[0]["name"] if posted else "?"
-    return f"Đã phát hành hóa đơn {name} cho {partner}."
+    return envelope(True, f"Đã phát hành hóa đơn {name} cho {partner}.",
+                    ref=name, model="account.move", res_id=row["id"],
+                    state="posted")
+
+
+@mcp.tool()
+def create_invoice_from_order(order_ref: str) -> str:
+    """Tạo hóa đơn nháp (account.move) từ một đơn bán ĐÃ XÁC NHẬN.
+    Chỉ tạo nháp — phát hành hóa đơn là bước riêng (post_invoice). Đơn chưa
+    xác nhận sẽ bị từ chối kèm gợi ý xác nhận trước.
+    YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        order_ref: Mã đơn bán, ví dụ "S00012".
+    """
+    try:
+        rows = odoo("sale.order", "search_read",
+                    [[["name", "=", order_ref]]],
+                    {"fields": ["id", "name", "state", "invoice_status",
+                                "invoice_ids"], "limit": 2})
+        if not rows:
+            return envelope(False, f"Không tìm thấy đơn '{order_ref}'.")
+        if len(rows) > 1:
+            return envelope(False, f"Có nhiều đơn tên '{order_ref}'. Vui lòng nêu rõ hơn.")
+
+        so = rows[0]
+        name = so["name"]
+        if so["state"] not in ("sale", "done"):
+            return envelope(False, f"Đơn {name} chưa xác nhận (trạng thái nháp). "
+                                   f"Hãy xác nhận đơn trước khi tạo hóa đơn.")
+        if so["invoice_status"] != "to invoice":
+            # Verified-live: after full invoicing Odoo 19 reports 'no' (not
+            # 'invoiced'), so one guard covers both not-deliverable and done.
+            return envelope(False, f"Không có gì để xuất hóa đơn cho đơn {name} "
+                                   f"(chưa giao hàng, hoặc đã xuất đủ).")
+
+        before = set(so["invoice_ids"] or [])
+        ctx = {"active_model": "sale.order", "active_ids": [so["id"]],
+               "active_id": so["id"]}
+        wid = odoo("sale.advance.payment.inv", "create",
+                   [{"advance_payment_method": "delivered"}], {"context": ctx})
+        # create_invoices returns an action dict Odoo can't marshal over
+        # XML-RPC; odoo() maps that benign Fault to None — success is verified
+        # by re-reading invoice_ids below, never from this return value.
+        odoo("sale.advance.payment.inv", "create_invoices", [[wid]],
+             {"context": ctx})
+
+        after = odoo("sale.order", "read", [[so["id"]]], {"fields": ["invoice_ids"]})
+        new_ids = [i for i in (after[0]["invoice_ids"] if after else [])
+                   if i not in before]
+        if not new_ids:
+            return envelope(False, f"Không tạo được hóa đơn cho đơn {name} — "
+                                   f"vui lòng kiểm tra trên Odoo.")
+        return envelope(True, f"Đã tạo hóa đơn nháp cho đơn {name} (chưa phát hành).",
+                        ref=None, model="account.move", res_id=max(new_ids),
+                        state="draft")
+    except Exception as e:  # noqa: BLE001 — never raise through the MCP tool
+        return envelope(False, f"Lỗi khi tạo hóa đơn cho đơn {order_ref}: {e}")
 
 
 @mcp.tool()
@@ -398,18 +495,18 @@ def create_quotation(partner_name: str = "", lines: list | None = None,
     """
     lines = lines or []
     if not lines:
-        return "Vui lòng cho biết sản phẩm và số lượng cần báo giá."
+        return envelope(False, "Vui lòng cho biết sản phẩm và số lượng cần báo giá.")
 
     if partner_id:
         prows = odoo("res.partner", "read", [[partner_id]], {"fields": ["id", "name"]})
         if not prows:
-            return f"Không tìm thấy khách hàng ID {partner_id}."
+            return envelope(False, f"Không tìm thấy khách hàng ID {partner_id}.")
         partner = prows[0]
     else:
         partner, msg = _resolve_partner(partner_name, "khách hàng",
                                         "Vui lòng nêu rõ tên khách hàng.")
         if msg:
-            return msg
+            return envelope(False, msg)
 
     order_line = []
     for line in lines:
@@ -420,7 +517,7 @@ def create_quotation(partner_name: str = "", lines: list | None = None,
             continue
         prod, pmsg = _resolve_product(line["product"], "sale_ok")
         if pmsg:
-            return pmsg
+            return envelope(False, pmsg)
         order_line.append((0, 0, {"product_id": prod["id"],
                                   "product_uom_qty": line["qty"]}))
 
@@ -428,7 +525,9 @@ def create_quotation(partner_name: str = "", lines: list | None = None,
                [{"partner_id": partner["id"], "order_line": order_line}])
     so = odoo("sale.order", "read", [[sid]], {"fields": ["name"]})
     name = so[0]["name"] if so else "?"
-    return f"Đã tạo báo giá {name} cho {partner['name']} ({len(lines)} dòng)."
+    return envelope(True,
+                    f"Đã tạo báo giá {name} (nháp) cho {partner['name']} ({len(lines)} dòng).",
+                    ref=name, model="sale.order", res_id=sid, state="draft")
 
 
 @mcp.tool()

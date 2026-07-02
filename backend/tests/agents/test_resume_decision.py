@@ -80,3 +80,64 @@ async def test_confirm_unclear_reasks():
 async def test_absent_kind_defaults_to_confirm():
     out = await _decide_resume(None, [], "q", "không", MagicMock())
     assert isinstance(out, Command) and out.resume is False
+
+
+def test_pending_options_returned_for_next_action_kind():
+    # Anti-regression: the old filter accepted only kind=="disambiguation",
+    # which silently disabled index/label picking for the continuation menu.
+    snap = _Snap({"kind": "next_action", "question": "menu?",
+                  "options": [{"id": True, "name": "Xác nhận báo giá"},
+                              {"id": False, "name": "Dừng"}]})
+    assert _pending_options(snap) == [{"id": True, "name": "Xác nhận báo giá"},
+                                      {"id": False, "name": "Dừng"}]
+
+
+NEXT_OPTS = [{"id": True, "name": "Xác nhận báo giá"},
+             {"id": False, "name": "Dừng"}]
+
+
+@pytest.mark.asyncio
+async def test_next_action_pick_label_resumes_true():
+    out = await _decide_resume("next_action", NEXT_OPTS, "q",
+                               "xác nhận báo giá", MagicMock())
+    assert isinstance(out, Command) and out.resume is True
+
+
+@pytest.mark.asyncio
+async def test_next_action_pick_stop_resumes_false_not_reask():
+    # id=False is a VALID pick — `chosen is not None` must accept it.
+    out = await _decide_resume("next_action", NEXT_OPTS, "q", "dừng", MagicMock())
+    assert isinstance(out, Command) and out.resume is False
+
+
+@pytest.mark.asyncio
+async def test_next_action_index_pick():
+    out = await _decide_resume("next_action", NEXT_OPTS, "q", "1", MagicMock())
+    assert isinstance(out, Command) and out.resume is True
+
+
+@pytest.mark.asyncio
+async def test_next_action_yes_fallback_to_confirmation():
+    llm = MagicMock()   # "có" resolves deterministically in classify_confirmation
+    out = await _decide_resume("next_action", NEXT_OPTS, "q", "có", llm)
+    assert isinstance(out, Command) and out.resume is True
+
+
+@pytest.mark.asyncio
+async def test_next_action_unclear_reasks():
+    llm = MagicMock()
+    llm.ainvoke = AsyncMock(return_value=MagicMock(content="UNCLEAR"))
+    out = await _decide_resume("next_action", NEXT_OPTS, "MENU?", "hmm?", llm)
+    assert out == "MENU?"
+
+
+@pytest.mark.asyncio
+async def test_next_action_index_stop_resumes_false_exercises_guard():
+    # "2" is NOT a cancel keyword, so it only resolves to False via
+    # parse_selection → the `is not None` guard. A truthy-guard regression
+    # would fall through to classify_confirmation("2")→UNCLEAR→re-ask string,
+    # failing this assertion. This genuinely pins the guard.
+    llm = MagicMock()
+    llm.ainvoke = AsyncMock(return_value=MagicMock(content="UNCLEAR"))
+    out = await _decide_resume("next_action", NEXT_OPTS, "MENU?", "2", llm)
+    assert isinstance(out, Command) and out.resume is False

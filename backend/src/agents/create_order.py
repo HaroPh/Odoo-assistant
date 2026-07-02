@@ -13,7 +13,7 @@ from langchain_core.messages import AIMessage
 from langgraph.types import interrupt as _interrupt
 
 from .state import ERPAgentState
-from .tool_result import _tool_result_text
+from .tool_result import parse_write_result
 from ..erp_query import sales, inventory, purchase
 
 WRITE_DISABLED_MSG = ("Tính năng ghi (tạo/sửa đơn hàng, cập nhật tồn kho) "
@@ -170,7 +170,10 @@ def make_order_node(tools, cfg: OrderCfg):
                  "lines": [{"product_id": l["product_id"], "qty": l["qty"]} for l in lines]})
         except Exception as e:  # noqa: BLE001 — never crash the graph
             return _msg(f"Lỗi khi tạo đơn: {e}")
-        return _msg(_tool_result_text(result))
+        display, env = parse_write_result(result)
+        return {"messages": [AIMessage(content=display)],
+                "pending_action": None,
+                "last_write": {"tool": cfg.tool_name, **env} if env else None}
 
     return order_node
 

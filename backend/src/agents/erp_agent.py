@@ -74,11 +74,12 @@ def _pending_kind(snapshot) -> str | None:
 
 
 def _pending_options(snapshot) -> list:
-    """Candidate options of a parked disambiguation interrupt (else [])."""
+    """Candidate options of a parked option-bearing interrupt (else [])."""
     for task in getattr(snapshot, "tasks", ()) or ():
         for it in getattr(task, "interrupts", ()) or ():
             value = getattr(it, "value", None)
-            if isinstance(value, dict) and value.get("kind") == "disambiguation":
+            if isinstance(value, dict) and value.get("kind") in (
+                    "disambiguation", "next_action"):
                 return value.get("options") or []
     return []
 
@@ -87,12 +88,22 @@ async def _decide_resume(kind, options, question, reply, llm):
     """Turn the user's reply into a resume Command, or a re-ask string.
 
     disambiguation → parse the selection (deterministic) → resume the chosen id;
+    next_action → parse the menu pick (ids are booleans; False = "Dừng" is a
+    valid pick, so compare `is not None`) with a yes/no fallback;
     confirm (or unspecified) → classify yes/no → resume a bool. Ambiguous → re-ask."""
     if kind == "disambiguation":
         chosen = parse_selection(reply, options)
         if chosen is None:
             return question or "Vui lòng chọn một mục trong danh sách."
         return Command(resume=chosen)
+    if kind == "next_action":
+        chosen = parse_selection(reply, options)
+        if chosen is not None:
+            return Command(resume=chosen)
+        verdict = await classify_confirmation(reply, llm)
+        if verdict == UNCLEAR:
+            return question or "Bạn muốn tiếp tục hay dừng? (chọn một mục hoặc có/không)"
+        return Command(resume=verdict == CONFIRM)
     verdict = await classify_confirmation(reply, llm)
     if verdict == UNCLEAR:
         return question or "Bạn xác nhận thực hiện thao tác này? (có / không)"

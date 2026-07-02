@@ -40,3 +40,7 @@ def test_planner_prompt_advertises_create_rfq():
 def test_planner_prompt_advertises_inventory_adjustment():
     assert "inventory_adjustment" in WRITE_PLANNER_PROMPT
     assert "new_qty" in WRITE_PLANNER_PROMPT
+
+
+def test_planner_prompt_advertises_create_invoice_from_order():
+    assert "create_invoice_from_order(order_ref" in WRITE_PLANNER_PROMPT
