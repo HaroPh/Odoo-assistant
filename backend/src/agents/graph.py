@@ -13,6 +13,7 @@ from .nodes import (
 )
 from .fusion import make_fusion_node
 from .write_registry import WRITE_COORDINATORS, COORDINATED_TOOLS
+from .continuation import make_write_continuation_node, _route_after_continuation
 
 
 def _route_by_intent(state: ERPAgentState) -> str:
@@ -42,6 +43,7 @@ def build_graph(llm, tools, checkpointer) -> object:
     g.add_node("respond_unknown", make_respond_unknown_node(llm))
     for spec in WRITE_COORDINATORS.values():
         g.add_node(spec.node, spec.build(llm, tools))
+    g.add_node("write_continuation", make_write_continuation_node())
 
     g.set_entry_point("intent_router")
 
@@ -57,9 +59,11 @@ def build_graph(llm, tools, checkpointer) -> object:
     write_targets = {END: END, "erp_write_executor": "erp_write_executor"}
     write_targets.update({spec.node: spec.node for spec in WRITE_COORDINATORS.values()})
     g.add_conditional_edges("erp_write_planner", _route_after_write_planner, write_targets)
-    g.add_edge("erp_write_executor", END)
+    g.add_edge("erp_write_executor", "write_continuation")
     for spec in WRITE_COORDINATORS.values():
-        g.add_edge(spec.node, END)
+        g.add_edge(spec.node, "write_continuation")
+    g.add_conditional_edges("write_continuation", _route_after_continuation,
+                            {"erp_write_executor": "erp_write_executor", END: END})
     g.add_edge("rag", END)
     g.add_edge("mixed", END)
     g.add_edge("respond_unknown", END)
