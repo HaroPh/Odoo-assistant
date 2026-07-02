@@ -13,7 +13,7 @@ from .prompts import INTENT_ROUTER_PROMPT, SYSTEM_PROMPT, WRITE_PLANNER_PROMPT, 
 from .write_registry import COORDINATED_TOOLS
 from ..rag.retrieve import retrieve
 from .synthesis import synthesize, SAFE_MSG
-from .tool_result import _tool_result_text
+from .tool_result import _tool_result_text, parse_write_result
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,7 @@ def make_erp_write_planner_node(llm):
                     "Tính năng ghi (tạo/sửa đơn hàng, cập nhật tồn kho) "
                     "chưa được kích hoạt trong phiên bản này."
                 )
-            )]}
+            )], "pending_action": None}
 
         # Plan the action
         response = await llm.ainvoke([
@@ -111,7 +111,8 @@ def make_erp_write_planner_node(llm):
             plan = json.loads(response.content.strip())
         except json.JSONDecodeError:
             logger.warning("Write planner returned non-JSON: %s", response.content)
-            return {"messages": [AIMessage(content="Không thể xác định thao tác cần thực hiện. Vui lòng mô tả rõ hơn.")]}
+            return {"messages": [AIMessage(content="Không thể xác định thao tác cần thực hiện. Vui lòng mô tả rõ hơn.")],
+                    "pending_action": None}
 
         # Coordinated writes own their own resolution + confirm; don't interrupt here.
         if plan.get("tool") in COORDINATED_TOOLS:
@@ -142,8 +143,9 @@ def make_erp_write_executor_node(tools):
     by_name = {t.name: t for t in tools}
 
     async def erp_write_executor(state: ERPAgentState) -> dict:
+        cleared = {"pending_action": None, "confirmed": None, "last_write": None}
         if not state.get("confirmed"):
-            return {"messages": [AIMessage(content="Đã hủy thao tác.")]}
+            return {"messages": [AIMessage(content="Đã hủy thao tác.")], **cleared}
 
         action = state.get("pending_action") or {}
         name = action.get("tool")
@@ -151,14 +153,17 @@ def make_erp_write_executor_node(tools):
         if tool is None:
             return {"messages": [AIMessage(
                 content=f"Thao tác '{name}' không khả dụng."
-            )]}
+            )], **cleared}
         try:
             result = await tool.ainvoke(action.get("args") or {})
         except Exception as e:
             logger.exception("write executor failed: tool=%s", name)
             return {"messages": [AIMessage(
                 content=f"Lỗi khi thực hiện thao tác: {e}"
-            )]}
-        return {"messages": [AIMessage(content=_tool_result_text(result))]}
+            )], **cleared}
+        display, env = parse_write_result(result)
+        return {"messages": [AIMessage(content=display)],
+                "pending_action": None, "confirmed": None,
+                "last_write": {"tool": name, **env} if env else None}
 
     return erp_write_executor
