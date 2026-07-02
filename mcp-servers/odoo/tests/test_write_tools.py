@@ -587,3 +587,57 @@ def test_confirm_so_already_confirmed_ok_false(monkeypatch):
     assert data["ok"] is False
     assert "đã được xác nhận" in data["display"].lower()
     assert cap == []
+
+
+# ── post_invoice: id path + envelope ─────────────────────────────────────────
+
+def test_post_invoice_by_id_posts_draft(monkeypatch):
+    cap = []
+    calls = patch_odoo(monkeypatch, {
+        ("account.move", "search_read"): [
+            {"id": 61, "name": False, "state": "draft", "partner_id": [7, "Azure"]}],
+        ("account.move", "read"): [{"name": "INV/2026/00032", "partner_id": [7, "Azure"]}],
+    }, confirm_capture=cap)
+    data = _env(fn("post_invoice")(invoice_id=61))
+    assert data["ok"] is True and data["ref"] == "INV/2026/00032"
+    assert data["model"] == "account.move" and data["res_id"] == 61
+    assert data["state"] == "posted"
+    assert ("account.move", "action_post", [[61]]) in cap
+    assert ["id", "=", 61] in calls[0]["args"][0]      # id-filtered domain
+
+
+def test_post_invoice_by_id_already_posted(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch, {("account.move", "search_read"): [
+        {"id": 62, "name": "INV/2026/00031", "state": "posted",
+         "partner_id": [7, "Azure"]}]}, confirm_capture=cap)
+    data = _env(fn("post_invoice")(invoice_id=62))
+    assert data["ok"] is False
+    assert "đã phát hành" in data["display"].lower()
+    assert cap == []
+
+
+def test_post_invoice_by_id_not_found(monkeypatch):
+    patch_odoo(monkeypatch, {("account.move", "search_read"): []})
+    data = _env(fn("post_invoice")(invoice_id=999))
+    assert data["ok"] is False
+    assert "không tìm thấy" in data["display"].lower()
+
+
+def test_post_invoice_no_args_asks(monkeypatch):
+    patch_odoo(monkeypatch, {})
+    data = _env(fn("post_invoice")())
+    assert data["ok"] is False
+
+
+def test_post_invoice_name_path_success_envelope(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch, {
+        ("account.move", "search_read"): [
+            {"id": 58, "partner_id": [15, "Azure Interior"], "amount_total": 100.0,
+             "invoice_date": "2026-06-27", "move_type": "out_invoice"}],
+        ("account.move", "read"): [{"name": "INV/2026/00012"}],
+    }, confirm_capture=cap)
+    data = _env(fn("post_invoice")("Azure"))
+    assert data["ok"] is True and data["ref"] == "INV/2026/00012"
+    assert data["res_id"] == 58 and data["state"] == "posted"
