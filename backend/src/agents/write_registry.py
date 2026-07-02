@@ -22,3 +22,22 @@ WRITE_COORDINATORS = {
 }
 
 COORDINATED_TOOLS = frozenset(WRITE_COORDINATORS)
+
+
+@dataclass(frozen=True)
+class NextStep:
+    label: str                       # menu label, e.g. "Xác nhận báo giá"
+    tool: str                        # next tool in the chain
+    args: Callable[[dict], dict]     # last_write -> args for that tool
+
+
+# Linear next step per chain tool; absence = terminal. Adding a purchase chain
+# later = envelope-ize its tools + add rows here (no node changes).
+NEXT_STEPS = {
+    "create_quotation":          NextStep("Xác nhận báo giá", "confirm_sale_order",
+                                          lambda lw: {"order_ref": lw["ref"]}),
+    "confirm_sale_order":        NextStep("Tạo hóa đơn", "create_invoice_from_order",
+                                          lambda lw: {"order_ref": lw["ref"]}),
+    "create_invoice_from_order": NextStep("Phát hành hóa đơn", "post_invoice",
+                                          lambda lw: {"invoice_id": lw["res_id"]}),
+}
