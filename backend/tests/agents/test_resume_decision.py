@@ -129,3 +129,15 @@ async def test_next_action_unclear_reasks():
     llm.ainvoke = AsyncMock(return_value=MagicMock(content="UNCLEAR"))
     out = await _decide_resume("next_action", NEXT_OPTS, "MENU?", "hmm?", llm)
     assert out == "MENU?"
+
+
+@pytest.mark.asyncio
+async def test_next_action_index_stop_resumes_false_exercises_guard():
+    # "2" is NOT a cancel keyword, so it only resolves to False via
+    # parse_selection → the `is not None` guard. A truthy-guard regression
+    # would fall through to classify_confirmation("2")→UNCLEAR→re-ask string,
+    # failing this assertion. This genuinely pins the guard.
+    llm = MagicMock()
+    llm.ainvoke = AsyncMock(return_value=MagicMock(content="UNCLEAR"))
+    out = await _decide_resume("next_action", NEXT_OPTS, "MENU?", "2", llm)
+    assert isinstance(out, Command) and out.resume is False
