@@ -6,6 +6,7 @@ Chạy (host, cần mcp-odoo SSE :8001 + litellm :4000 đang chạy):
     cd backend
     uvicorn src.main:app --host 0.0.0.0 --port 8000
 """
+import hashlib
 import json
 import time
 import uuid
@@ -56,6 +57,23 @@ def _filter_messages(messages: list[dict]) -> list[dict]:
             if m.get("role") in ("user", "assistant") and m.get("content")]
 
 
+def _derive_thread_id(body: dict, messages: list[dict]) -> str | None:
+    """Stable per-conversation thread for interrupt/resume.
+
+    Prefer an explicit id from the client. Open WebUI sends neither `session_id`
+    nor `id`, so fall back to a hash of the FIRST user message — stable across the
+    turns of one conversation (the client resends full history each turn), so a
+    later "có"/"không" resumes the same parked confirm instead of a fresh UUID.
+    """
+    explicit = body.get("session_id") or body.get("id")
+    if explicit:
+        return str(explicit)
+    first_user = next((m["content"] for m in messages if m.get("role") == "user"), "")
+    if not first_user:
+        return None
+    return "conv-" + hashlib.sha1(first_user.encode("utf-8")).hexdigest()[:16]
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(req: Request):
     body = await req.json()
@@ -63,9 +81,9 @@ async def chat_completions(req: Request):
     messages = _filter_messages(body.get("messages", []))
 
     agent: ERPAgent = _state["agent"]
-    # Accept stable session_id from client (needed when write gate is unlocked).
-    # Defaults to per-request UUID (safe while WRITE_ACTIONS_ENABLED=false).
-    thread_id = body.get("session_id") or body.get("id")
+    # Stable thread per conversation so multi-turn confirmation resumes correctly
+    # (Open WebUI sends no session id — derive one from the first user message).
+    thread_id = _derive_thread_id(body, messages)
     answer = await agent.chat(messages, thread_id=thread_id)
 
     cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
