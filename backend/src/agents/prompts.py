@@ -32,6 +32,7 @@ Available write tools — use the tool name and arg keys EXACTLY as written:
 - confirm_sale_order(order_ref: str)          # order_ref = mã đơn bán, vd "S00012"
 - confirm_purchase_order(order_ref: str)      # order_ref = mã đơn mua, vd "P00003"
 - post_invoice(partner_name: str, amount: float = null, invoice_date: str = null)  # phát hành hóa đơn nháp của khách; amount/invoice_date để chọn khi có nhiều nháp
+- create_invoice_from_order(order_ref: str)   # tạo hóa đơn nháp từ đơn bán ĐÃ XÁC NHẬN, vd "S00012"
 - validate_picking(picking_ref: str)          # picking_ref = mã phiếu, vd "WH/OUT/00001"
 - create_quotation(partner_name: str, lines: list)  # tạo báo giá nháp; lines = [{"product": "<tên SP>", "qty": <số>}, ...]
 - create_rfq(partner_name: str, lines: list)  # tạo RFQ (đơn mua nháp); partner_name = tên nhà cung cấp; lines = [{"product": "<tên SP>", "qty": <số>}, ...]
