@@ -451,6 +451,71 @@ def validate_picking(picking_ref: str) -> str:
     return f"Đã xác nhận phiếu {name}."
 
 
+@mcp.tool()
+def deliver_order(order_ref: str) -> str:
+    """Giao hàng cho một đơn bán ĐÃ XÁC NHẬN: xác nhận mọi phiếu xuất kho
+    (stock.picking) đã reserve đủ của đơn. Đơn không có phiếu cần giao
+    (dịch vụ / đã giao đủ) được coi là hoàn tất — chuỗi đi tiếp bước
+    tạo hóa đơn. YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        order_ref: Mã đơn bán, ví dụ "S00012".
+    """
+    try:
+        rows = odoo("sale.order", "search_read",
+                    [[["name", "=", order_ref]]],
+                    {"fields": ["id", "name", "state", "picking_ids"],
+                     "limit": 2})
+        if not rows:
+            return envelope(False, f"Không tìm thấy đơn '{order_ref}'.")
+        if len(rows) > 1:
+            return envelope(False,
+                            f"Có nhiều đơn tên '{order_ref}'. Vui lòng nêu rõ hơn.")
+
+        so = rows[0]
+        name = so["name"]
+        if so["state"] not in ("sale", "done"):
+            return envelope(False, f"Đơn {name} chưa xác nhận (trạng thái nháp). "
+                                   f"Hãy xác nhận đơn trước khi giao hàng.")
+
+        pickings = []
+        if so["picking_ids"]:
+            # Chỉ phiếu XUẤT — bỏ phiếu trả hàng/incoming của cùng đơn.
+            pickings = odoo("stock.picking", "search_read",
+                            [[["id", "in", so["picking_ids"]],
+                              ["picking_type_code", "=", "outgoing"]]],
+                            {"fields": ["id", "name", "state"]})
+        pending = [p for p in pickings if p["state"] not in ("done", "cancel")]
+        if not pending:
+            # Pass-through: dịch vụ / giao ngay / đã giao đủ — chuỗi vẫn mời
+            # bước "Tạo hóa đơn" tiếp theo.
+            return envelope(True, f"Đơn {name} không có phiếu cần giao "
+                                  f"(dịch vụ hoặc đã giao đủ).",
+                            ref=name, model="sale.order", res_id=so["id"],
+                            state="sale")
+
+        assigned = [p for p in pending if p["state"] == "assigned"]
+        if not assigned:
+            states = ", ".join(sorted({p["state"] for p in pending}))
+            return envelope(False,
+                            f"Phiếu giao của đơn {name} chưa reserve đủ hàng "
+                            f"(trạng thái: {states}). Kiểm tra tồn kho trước khi giao.")
+
+        for p in assigned:
+            # Odoo 19: phiếu 'assigned' đã auto-set done-qty = reserved nên
+            # button_validate chạy thẳng; dict trả về = wizard → dừng an toàn.
+            result = odoo("stock.picking", "button_validate", [[p["id"]]])
+            if isinstance(result, dict):
+                return envelope(False,
+                                f"Phiếu {p['name']} cần thao tác bổ sung trên Odoo "
+                                f"(wizard không hỗ trợ qua API). Vui lòng xử lý trực tiếp.")
+
+        return envelope(True, f"Đã giao hàng cho đơn {name} ({len(assigned)} phiếu).",
+                        ref=name, model="sale.order", res_id=so["id"], state="sale")
+    except Exception as e:  # noqa: BLE001 — không exception nào xuyên qua MCP tool
+        return envelope(False, f"Lỗi khi giao hàng cho đơn {order_ref}: {e}")
+
+
 def _resolve_partner(name, kind_label, hint):
     """Resolve a partner name → unique row via the disambiguation pattern.
     Lenient (no rank filter); returns (row, None) or (None, listing/not-found msg)."""

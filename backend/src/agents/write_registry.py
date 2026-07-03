@@ -36,7 +36,9 @@ class NextStep:
 NEXT_STEPS = {
     "create_quotation":          NextStep("Xác nhận báo giá", "confirm_sale_order",
                                           lambda lw: {"order_ref": lw["ref"]}),
-    "confirm_sale_order":        NextStep("Tạo hóa đơn", "create_invoice_from_order",
+    "confirm_sale_order":        NextStep("Giao hàng", "deliver_order",
+                                          lambda lw: {"order_ref": lw["ref"]}),
+    "deliver_order":             NextStep("Tạo hóa đơn", "create_invoice_from_order",
                                           lambda lw: {"order_ref": lw["ref"]}),
     "create_invoice_from_order": NextStep("Phát hành hóa đơn", "post_invoice",
                                           lambda lw: {"invoice_id": lw["res_id"]}),
