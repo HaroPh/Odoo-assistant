@@ -42,27 +42,45 @@ def test_non_envelope_json_is_plain_text():
 
 
 def test_next_steps_chain_is_linear_and_terminal():
-    assert set(NEXT_STEPS) == {"create_quotation", "confirm_sale_order",
-                               "deliver_order", "create_invoice_from_order"}
-    lw = {"tool": "create_quotation", "ok": True, "ref": "S00031",
-          "model": "sale.order", "res_id": 42, "state": "draft", "display": "x"}
-    step = NEXT_STEPS["create_quotation"]
-    assert step.tool == "confirm_sale_order"
-    assert step.label == "Xác nhận báo giá"
-    assert step.args(lw) == {"order_ref": "S00031"}
-    step2 = NEXT_STEPS["confirm_sale_order"]
-    assert step2.tool == "deliver_order"
-    assert step2.label == "Giao hàng"
-    assert step2.args({**lw, "tool": "confirm_sale_order",
-                       "state": "sale"}) == {"order_ref": "S00031"}
-    step3 = NEXT_STEPS["deliver_order"]
-    assert step3.tool == "create_invoice_from_order"
-    assert step3.label == "Tạo hóa đơn"
-    assert step3.args({**lw, "tool": "deliver_order",
-                       "state": "sale"}) == {"order_ref": "S00031"}
-    step4 = NEXT_STEPS["create_invoice_from_order"]
-    assert step4.tool == "post_invoice"
-    assert step4.label == "Phát hành hóa đơn"
-    assert step4.args({**lw, "tool": "create_invoice_from_order",
-                       "ref": None, "res_id": 61}) == {"invoice_id": 61}
-    assert "post_invoice" not in NEXT_STEPS      # terminal
+    assert set(NEXT_STEPS) == {
+        "create_quotation", "confirm_sale_order", "deliver_order",
+        "create_invoice_from_order",
+        "create_rfq", "confirm_purchase_order", "receive_order",
+        "create_bill_from_po",
+    }
+    lw = {"tool": "x", "ok": True, "ref": "S00031", "model": "sale.order",
+          "res_id": 42, "state": "draft", "display": "x"}
+    # ── sale chain ──
+    assert (NEXT_STEPS["create_quotation"].tool, NEXT_STEPS["create_quotation"].label) \
+        == ("confirm_sale_order", "Xác nhận báo giá")
+    assert NEXT_STEPS["create_quotation"].args(lw) == {"order_ref": "S00031"}
+    assert (NEXT_STEPS["confirm_sale_order"].tool, NEXT_STEPS["confirm_sale_order"].label) \
+        == ("deliver_order", "Giao hàng")
+    assert NEXT_STEPS["confirm_sale_order"].args(lw) == {"order_ref": "S00031"}
+    assert (NEXT_STEPS["deliver_order"].tool, NEXT_STEPS["deliver_order"].label) \
+        == ("create_invoice_from_order", "Tạo hóa đơn")
+    assert NEXT_STEPS["deliver_order"].args(lw) == {"order_ref": "S00031"}
+    assert (NEXT_STEPS["create_invoice_from_order"].tool,
+            NEXT_STEPS["create_invoice_from_order"].label) \
+        == ("post_invoice", "Phát hành hóa đơn")
+    assert NEXT_STEPS["create_invoice_from_order"].args(
+        {**lw, "ref": None, "res_id": 61}) == {"invoice_id": 61}
+    # ── purchase chain ──
+    plw = {**lw, "ref": "P00040", "model": "purchase.order", "res_id": 15}
+    assert (NEXT_STEPS["create_rfq"].tool, NEXT_STEPS["create_rfq"].label) \
+        == ("confirm_purchase_order", "Xác nhận đơn mua")
+    assert NEXT_STEPS["create_rfq"].args(plw) == {"order_ref": "P00040"}
+    assert (NEXT_STEPS["confirm_purchase_order"].tool,
+            NEXT_STEPS["confirm_purchase_order"].label) \
+        == ("receive_order", "Nhận hàng")
+    assert NEXT_STEPS["confirm_purchase_order"].args(plw) == {"order_ref": "P00040"}
+    assert (NEXT_STEPS["receive_order"].tool, NEXT_STEPS["receive_order"].label) \
+        == ("create_bill_from_po", "Tạo hóa đơn NCC")
+    assert NEXT_STEPS["receive_order"].args(plw) == {"order_ref": "P00040"}
+    assert (NEXT_STEPS["create_bill_from_po"].tool,
+            NEXT_STEPS["create_bill_from_po"].label) \
+        == ("post_invoice", "Phát hành hóa đơn")
+    assert NEXT_STEPS["create_bill_from_po"].args(
+        {**plw, "ref": None, "res_id": 65}) == {"invoice_id": 65}
+    # ── shared terminal ──
+    assert "post_invoice" not in NEXT_STEPS

@@ -48,3 +48,11 @@ def test_planner_prompt_advertises_create_invoice_from_order():
 
 def test_planner_prompt_advertises_deliver_order():
     assert "deliver_order(order_ref" in WRITE_PLANNER_PROMPT
+
+
+def test_planner_prompt_advertises_receive_order():
+    assert "receive_order(order_ref" in WRITE_PLANNER_PROMPT
+
+
+def test_planner_prompt_advertises_create_bill_from_po():
+    assert "create_bill_from_po(order_ref" in WRITE_PLANNER_PROMPT
