@@ -270,19 +270,22 @@ def confirm_purchase_order(order_ref: str) -> str:
                 [[["name", "=", order_ref]]],
                 {"fields": ["id", "name", "state"], "limit": 2})
     if not rows:
-        return f"Không tìm thấy đơn mua '{order_ref}'."
+        return envelope(False, f"Không tìm thấy đơn mua '{order_ref}'.")
     if len(rows) > 1:
-        return f"Có nhiều đơn mua tên '{order_ref}'. Vui lòng nêu rõ hơn."
+        return envelope(False,
+                        f"Có nhiều đơn mua tên '{order_ref}'. Vui lòng nêu rõ hơn.")
 
     order = rows[0]
     name, state = order["name"], order["state"]
     if state in ("purchase", "done"):
-        return f"Đơn mua {name} đã được xác nhận rồi."
+        return envelope(False, f"Đơn mua {name} đã được xác nhận rồi.")
     if state == "cancel":
-        return f"Đơn mua {name} đã bị hủy, không thể xác nhận."
+        return envelope(False, f"Đơn mua {name} đã bị hủy, không thể xác nhận.")
 
     odoo("purchase.order", "button_confirm", [[order["id"]]])
-    return f"Đã xác nhận đơn mua {name}."
+    return envelope(True, f"Đã xác nhận đơn mua {name}.",
+                    ref=name, model="purchase.order", res_id=order["id"],
+                    state="purchase")
 
 
 @mcp.tool()
@@ -611,18 +614,18 @@ def create_rfq(supplier_name: str = "", lines: list | None = None,
     """
     lines = lines or []
     if not lines:
-        return "Vui lòng cho biết sản phẩm và số lượng cần đặt mua."
+        return envelope(False, "Vui lòng cho biết sản phẩm và số lượng cần đặt mua.")
 
     if partner_id:
         vrows = odoo("res.partner", "read", [[partner_id]], {"fields": ["id", "name"]})
         if not vrows:
-            return f"Không tìm thấy nhà cung cấp ID {partner_id}."
+            return envelope(False, f"Không tìm thấy nhà cung cấp ID {partner_id}.")
         vendor = vrows[0]
     else:
         vendor, msg = _resolve_partner(supplier_name, "nhà cung cấp",
                                        "Vui lòng nêu rõ tên nhà cung cấp.")
         if msg:
-            return msg
+            return envelope(False, msg)
 
     order_line = []
     for line in lines:
@@ -633,7 +636,7 @@ def create_rfq(supplier_name: str = "", lines: list | None = None,
             continue
         prod, pmsg = _resolve_product(line["product"], "purchase_ok")
         if pmsg:
-            return pmsg
+            return envelope(False, pmsg)
         order_line.append((0, 0, {"product_id": prod["id"],
                                   "product_qty": line["qty"]}))
 
@@ -641,7 +644,9 @@ def create_rfq(supplier_name: str = "", lines: list | None = None,
                 [{"partner_id": vendor["id"], "order_line": order_line}])
     po = odoo("purchase.order", "read", [[pid_]], {"fields": ["name"]})
     name = po[0]["name"] if po else "?"
-    return f"Đã tạo RFQ {name} cho {vendor['name']} ({len(lines)} dòng)."
+    return envelope(True,
+                    f"Đã tạo RFQ {name} (nháp) cho {vendor['name']} ({len(lines)} dòng).",
+                    ref=name, model="purchase.order", res_id=pid_, state="draft")
 
 
 @mcp.tool()
