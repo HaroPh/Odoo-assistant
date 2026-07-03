@@ -42,6 +42,7 @@ ODOO_METHOD_OPERATION_MAP = {
     # CREATE — Phase 3: cần confirmation
     "create": "create", "copy": "create", "name_create": "create",
     "create_invoices": "create",
+    "action_create_invoice": "create",
     # WRITE — Phase 3: cần confirmation
     "write": "write", "toggle_active": "write",
     "action_archive": "write", "message_post": "write",
@@ -270,19 +271,22 @@ def confirm_purchase_order(order_ref: str) -> str:
                 [[["name", "=", order_ref]]],
                 {"fields": ["id", "name", "state"], "limit": 2})
     if not rows:
-        return f"Không tìm thấy đơn mua '{order_ref}'."
+        return envelope(False, f"Không tìm thấy đơn mua '{order_ref}'.")
     if len(rows) > 1:
-        return f"Có nhiều đơn mua tên '{order_ref}'. Vui lòng nêu rõ hơn."
+        return envelope(False,
+                        f"Có nhiều đơn mua tên '{order_ref}'. Vui lòng nêu rõ hơn.")
 
     order = rows[0]
     name, state = order["name"], order["state"]
     if state in ("purchase", "done"):
-        return f"Đơn mua {name} đã được xác nhận rồi."
+        return envelope(False, f"Đơn mua {name} đã được xác nhận rồi.")
     if state == "cancel":
-        return f"Đơn mua {name} đã bị hủy, không thể xác nhận."
+        return envelope(False, f"Đơn mua {name} đã bị hủy, không thể xác nhận.")
 
     odoo("purchase.order", "button_confirm", [[order["id"]]])
-    return f"Đã xác nhận đơn mua {name}."
+    return envelope(True, f"Đã xác nhận đơn mua {name}.",
+                    ref=name, model="purchase.order", res_id=order["id"],
+                    state="purchase")
 
 
 @mcp.tool()
@@ -451,6 +455,35 @@ def validate_picking(picking_ref: str) -> str:
     return f"Đã xác nhận phiếu {name}."
 
 
+def _validate_order_pickings(picking_ids, type_code):
+    """Validate mọi phiếu `assigned` (đã sẵn sàng) của một đơn, lọc theo
+    picking_type_code ("outgoing" = giao, "incoming" = nhận). Trả (status, val):
+      ("none", None)            — không còn phiếu chờ → caller pass-through
+      ("not_ready", states_str) — có phiếu chờ nhưng chưa phiếu nào assigned
+      ("wizard", picking_name)  — button_validate trả dict → DỪNG ngay
+      ("done", k)               — đã validate k phiếu
+    Wording nằm ở call-site — helper không dựng thông điệp người dùng."""
+    pickings = []
+    if picking_ids:
+        pickings = odoo("stock.picking", "search_read",
+                        [[["id", "in", picking_ids],
+                          ["picking_type_code", "=", type_code]]],
+                        {"fields": ["id", "name", "state"]})
+    pending = [p for p in pickings if p["state"] not in ("done", "cancel")]
+    if not pending:
+        return "none", None
+    assigned = [p for p in pending if p["state"] == "assigned"]
+    if not assigned:
+        return "not_ready", ", ".join(sorted({p["state"] for p in pending}))
+    for p in assigned:
+        # Odoo 19: phiếu 'assigned' đã auto-set done-qty nên button_validate
+        # chạy thẳng; dict trả về = wizard → dừng an toàn.
+        result = odoo("stock.picking", "button_validate", [[p["id"]]])
+        if isinstance(result, dict):
+            return "wizard", p["name"]
+    return "done", len(assigned)
+
+
 @mcp.tool()
 def deliver_order(order_ref: str) -> str:
     """Giao hàng cho một đơn bán ĐÃ XÁC NHẬN: xác nhận mọi phiếu xuất kho
@@ -478,42 +511,126 @@ def deliver_order(order_ref: str) -> str:
             return envelope(False, f"Đơn {name} chưa xác nhận (trạng thái nháp). "
                                    f"Hãy xác nhận đơn trước khi giao hàng.")
 
-        pickings = []
-        if so["picking_ids"]:
-            # Chỉ phiếu XUẤT — bỏ phiếu trả hàng/incoming của cùng đơn.
-            pickings = odoo("stock.picking", "search_read",
-                            [[["id", "in", so["picking_ids"]],
-                              ["picking_type_code", "=", "outgoing"]]],
-                            {"fields": ["id", "name", "state"]})
-        pending = [p for p in pickings if p["state"] not in ("done", "cancel")]
-        if not pending:
+        status, val = _validate_order_pickings(so["picking_ids"], "outgoing")
+        if status == "none":
             # Pass-through: dịch vụ / giao ngay / đã giao đủ — chuỗi vẫn mời
             # bước "Tạo hóa đơn" tiếp theo.
             return envelope(True, f"Đơn {name} không có phiếu cần giao "
                                   f"(dịch vụ hoặc đã giao đủ).",
                             ref=name, model="sale.order", res_id=so["id"],
                             state="sale")
-
-        assigned = [p for p in pending if p["state"] == "assigned"]
-        if not assigned:
-            states = ", ".join(sorted({p["state"] for p in pending}))
+        if status == "not_ready":
             return envelope(False,
                             f"Phiếu giao của đơn {name} chưa reserve đủ hàng "
-                            f"(trạng thái: {states}). Kiểm tra tồn kho trước khi giao.")
-
-        for p in assigned:
-            # Odoo 19: phiếu 'assigned' đã auto-set done-qty = reserved nên
-            # button_validate chạy thẳng; dict trả về = wizard → dừng an toàn.
-            result = odoo("stock.picking", "button_validate", [[p["id"]]])
-            if isinstance(result, dict):
-                return envelope(False,
-                                f"Phiếu {p['name']} cần thao tác bổ sung trên Odoo "
-                                f"(wizard không hỗ trợ qua API). Vui lòng xử lý trực tiếp.")
-
-        return envelope(True, f"Đã giao hàng cho đơn {name} ({len(assigned)} phiếu).",
+                            f"(trạng thái: {val}). Kiểm tra tồn kho trước khi giao.")
+        if status == "wizard":
+            return envelope(False,
+                            f"Phiếu {val} cần thao tác bổ sung trên Odoo "
+                            f"(wizard không hỗ trợ qua API). Vui lòng xử lý trực tiếp.")
+        return envelope(True, f"Đã giao hàng cho đơn {name} ({val} phiếu).",
                         ref=name, model="sale.order", res_id=so["id"], state="sale")
     except Exception as e:  # noqa: BLE001 — không exception nào xuyên qua MCP tool
         return envelope(False, f"Lỗi khi giao hàng cho đơn {order_ref}: {e}")
+
+
+@mcp.tool()
+def receive_order(order_ref: str) -> str:
+    """Nhận hàng cho một đơn mua ĐÃ XÁC NHẬN: xác nhận mọi phiếu nhập kho
+    (stock.picking) đã sẵn sàng của đơn. Đơn không có phiếu cần nhận
+    (dịch vụ / đã nhận đủ) được coi là hoàn tất — chuỗi đi tiếp bước
+    lập hóa đơn NCC. YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        order_ref: Mã đơn mua, ví dụ "P00003".
+    """
+    try:
+        rows = odoo("purchase.order", "search_read",
+                    [[["name", "=", order_ref]]],
+                    {"fields": ["id", "name", "state", "picking_ids"],
+                     "limit": 2})
+        if not rows:
+            return envelope(False, f"Không tìm thấy đơn mua '{order_ref}'.")
+        if len(rows) > 1:
+            return envelope(False,
+                            f"Có nhiều đơn mua tên '{order_ref}'. Vui lòng nêu rõ hơn.")
+
+        po = rows[0]
+        name = po["name"]
+        if po["state"] not in ("purchase", "done"):
+            return envelope(False, f"Đơn mua {name} chưa xác nhận. "
+                                   f"Hãy xác nhận đơn trước khi nhận hàng.")
+
+        status, val = _validate_order_pickings(po["picking_ids"], "incoming")
+        if status == "none":
+            return envelope(True, f"Đơn mua {name} không có phiếu cần nhận "
+                                  f"(dịch vụ hoặc đã nhận đủ).",
+                            ref=name, model="purchase.order", res_id=po["id"],
+                            state="purchase")
+        if status == "not_ready":
+            return envelope(False,
+                            f"Phiếu nhập của đơn mua {name} chưa sẵn sàng nhận "
+                            f"(trạng thái: {val}).")
+        if status == "wizard":
+            return envelope(False,
+                            f"Phiếu {val} cần thao tác bổ sung trên Odoo "
+                            f"(wizard không hỗ trợ qua API). Vui lòng xử lý trực tiếp.")
+        return envelope(True, f"Đã nhận hàng cho đơn mua {name} ({val} phiếu).",
+                        ref=name, model="purchase.order", res_id=po["id"],
+                        state="purchase")
+    except Exception as e:  # noqa: BLE001 — không exception nào xuyên qua MCP tool
+        return envelope(False, f"Lỗi khi nhận hàng cho đơn mua {order_ref}: {e}")
+
+
+@mcp.tool()
+def create_bill_from_po(order_ref: str) -> str:
+    """Tạo hóa đơn nhà cung cấp (account.move nháp) từ một đơn mua ĐÃ XÁC NHẬN
+    và ĐÃ NHẬN HÀNG. Chỉ tạo nháp — phát hành là bước riêng (post_invoice).
+    Bill Date được đặt = hôm nay (Odoo bắt buộc trước khi phát hành).
+    YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        order_ref: Mã đơn mua, ví dụ "P00003".
+    """
+    try:
+        rows = odoo("purchase.order", "search_read",
+                    [[["name", "=", order_ref]]],
+                    {"fields": ["id", "name", "state", "invoice_status",
+                                "invoice_ids"], "limit": 2})
+        if not rows:
+            return envelope(False, f"Không tìm thấy đơn mua '{order_ref}'.")
+        if len(rows) > 1:
+            return envelope(False,
+                            f"Có nhiều đơn mua tên '{order_ref}'. Vui lòng nêu rõ hơn.")
+
+        po = rows[0]
+        name = po["name"]
+        if po["state"] not in ("purchase", "done"):
+            return envelope(False, f"Đơn mua {name} chưa xác nhận. "
+                                   f"Hãy xác nhận đơn trước khi lập hóa đơn.")
+        if po["invoice_status"] != "to invoice":
+            return envelope(False,
+                            f"Chưa có gì để lập hóa đơn NCC cho đơn mua {name} "
+                            f"(chưa nhận hàng, hoặc đã lập đủ).")
+
+        before = set(po["invoice_ids"] or [])
+        # action_create_invoice trả action dict — không tin return value; verify
+        # bằng đọc lại invoice_ids (verified-live 2026-07-03 trên P00015).
+        odoo("purchase.order", "action_create_invoice", [[po["id"]]])
+        after = odoo("purchase.order", "read", [[po["id"]]],
+                     {"fields": ["invoice_ids"]})
+        new_ids = [i for i in (after[0]["invoice_ids"] if after else [])
+                   if i not in before]
+        if not new_ids:
+            return envelope(False, f"Không tạo được hóa đơn cho đơn mua {name} — "
+                                   f"vui lòng kiểm tra trên Odoo.")
+        # Bill Date bắt buộc trước khi post (verified-live: "The Bill/Refund
+        # date is required to validate this document.")
+        odoo("account.move", "write", [new_ids, {"invoice_date": today_iso()}])
+        return envelope(True, f"Đã tạo hóa đơn NCC (nháp) cho đơn mua {name}.",
+                        ref=None, model="account.move", res_id=max(new_ids),
+                        state="draft")
+    except Exception as e:  # noqa: BLE001 — không exception nào xuyên qua MCP tool
+        return envelope(False, f"Lỗi khi tạo hóa đơn cho đơn mua {order_ref}: {e}")
 
 
 def _resolve_partner(name, kind_label, hint):
@@ -611,18 +728,18 @@ def create_rfq(supplier_name: str = "", lines: list | None = None,
     """
     lines = lines or []
     if not lines:
-        return "Vui lòng cho biết sản phẩm và số lượng cần đặt mua."
+        return envelope(False, "Vui lòng cho biết sản phẩm và số lượng cần đặt mua.")
 
     if partner_id:
         vrows = odoo("res.partner", "read", [[partner_id]], {"fields": ["id", "name"]})
         if not vrows:
-            return f"Không tìm thấy nhà cung cấp ID {partner_id}."
+            return envelope(False, f"Không tìm thấy nhà cung cấp ID {partner_id}.")
         vendor = vrows[0]
     else:
         vendor, msg = _resolve_partner(supplier_name, "nhà cung cấp",
                                        "Vui lòng nêu rõ tên nhà cung cấp.")
         if msg:
-            return msg
+            return envelope(False, msg)
 
     order_line = []
     for line in lines:
@@ -633,7 +750,7 @@ def create_rfq(supplier_name: str = "", lines: list | None = None,
             continue
         prod, pmsg = _resolve_product(line["product"], "purchase_ok")
         if pmsg:
-            return pmsg
+            return envelope(False, pmsg)
         order_line.append((0, 0, {"product_id": prod["id"],
                                   "product_qty": line["qty"]}))
 
@@ -641,7 +758,9 @@ def create_rfq(supplier_name: str = "", lines: list | None = None,
                 [{"partner_id": vendor["id"], "order_line": order_line}])
     po = odoo("purchase.order", "read", [[pid_]], {"fields": ["name"]})
     name = po[0]["name"] if po else "?"
-    return f"Đã tạo RFQ {name} cho {vendor['name']} ({len(lines)} dòng)."
+    return envelope(True,
+                    f"Đã tạo RFQ {name} (nháp) cho {vendor['name']} ({len(lines)} dòng).",
+                    ref=name, model="purchase.order", res_id=pid_, state="draft")
 
 
 @mcp.tool()

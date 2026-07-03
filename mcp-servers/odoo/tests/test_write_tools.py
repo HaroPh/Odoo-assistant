@@ -642,3 +642,56 @@ def test_post_invoice_name_path_success_envelope(monkeypatch):
     data = _env(fn("post_invoice")("Azure"))
     assert data["ok"] is True and data["ref"] == "INV/2026/00012"
     assert data["res_id"] == 58 and data["state"] == "posted"
+
+
+# ── envelope contract (purchase chain tools) ─────────────────────────────────
+
+def test_create_rfq_success_returns_envelope(monkeypatch):
+    def fake_odoo(model, method, args, kwargs=None, tool_name=None):
+        if method == "create":
+            return 88
+        if model == "res.partner":
+            return [{"id": 10, "name": "Gemini Furniture", "email": "g@x.com"}]
+        if model == "product.product":
+            return [{"id": 60, "name": "Screw", "default_code": "S1",
+                     "list_price": 0.5}]
+        if model == "purchase.order" and method == "read":
+            return [{"name": "P00013"}]
+        return []
+    monkeypatch.setattr(server, "odoo", fake_odoo)
+    data = _env(fn("create_rfq")("Gemini", [{"product": "Screw", "qty": 7}]))
+    assert data["ok"] is True
+    assert data["ref"] == "P00013" and data["model"] == "purchase.order"
+    assert data["res_id"] == 88 and data["state"] == "draft"
+    assert "P00013" in data["display"] and "nháp" in data["display"]
+
+
+def test_create_rfq_error_envelope_ok_false(monkeypatch):
+    patch_odoo(monkeypatch, {("res.partner", "search_read"): []})
+    data = _env(fn("create_rfq")("Nobody", [{"product": "Screw", "qty": 2}]))
+    assert data["ok"] is False and data["res_id"] is None
+    assert "không tìm thấy" in data["display"].lower()
+
+
+def test_confirm_po_success_returns_envelope(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch,
+               {"purchase.order": [{"id": 5, "name": "P00005", "state": "draft"}]},
+               confirm_capture=cap)
+    data = _env(fn("confirm_purchase_order")("P00005"))
+    assert data["ok"] is True and data["ref"] == "P00005"
+    assert data["model"] == "purchase.order" and data["res_id"] == 5
+    assert data["state"] == "purchase"
+    assert "đã xác nhận" in data["display"].lower()
+    assert ("purchase.order", "button_confirm", [[5]]) in cap
+
+
+def test_confirm_po_already_confirmed_ok_false(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch,
+               {"purchase.order": [{"id": 6, "name": "P00006", "state": "purchase"}]},
+               confirm_capture=cap)
+    data = _env(fn("confirm_purchase_order")("P00006"))
+    assert data["ok"] is False
+    assert "đã được xác nhận" in data["display"].lower()
+    assert cap == []
