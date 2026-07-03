@@ -454,6 +454,35 @@ def validate_picking(picking_ref: str) -> str:
     return f"Đã xác nhận phiếu {name}."
 
 
+def _validate_order_pickings(picking_ids, type_code):
+    """Validate mọi phiếu `assigned` (đã sẵn sàng) của một đơn, lọc theo
+    picking_type_code ("outgoing" = giao, "incoming" = nhận). Trả (status, val):
+      ("none", None)            — không còn phiếu chờ → caller pass-through
+      ("not_ready", states_str) — có phiếu chờ nhưng chưa phiếu nào assigned
+      ("wizard", picking_name)  — button_validate trả dict → DỪNG ngay
+      ("done", k)               — đã validate k phiếu
+    Wording nằm ở call-site — helper không dựng thông điệp người dùng."""
+    pickings = []
+    if picking_ids:
+        pickings = odoo("stock.picking", "search_read",
+                        [[["id", "in", picking_ids],
+                          ["picking_type_code", "=", type_code]]],
+                        {"fields": ["id", "name", "state"]})
+    pending = [p for p in pickings if p["state"] not in ("done", "cancel")]
+    if not pending:
+        return "none", None
+    assigned = [p for p in pending if p["state"] == "assigned"]
+    if not assigned:
+        return "not_ready", ", ".join(sorted({p["state"] for p in pending}))
+    for p in assigned:
+        # Odoo 19: phiếu 'assigned' đã auto-set done-qty nên button_validate
+        # chạy thẳng; dict trả về = wizard → dừng an toàn.
+        result = odoo("stock.picking", "button_validate", [[p["id"]]])
+        if isinstance(result, dict):
+            return "wizard", p["name"]
+    return "done", len(assigned)
+
+
 @mcp.tool()
 def deliver_order(order_ref: str) -> str:
     """Giao hàng cho một đơn bán ĐÃ XÁC NHẬN: xác nhận mọi phiếu xuất kho
@@ -481,42 +510,74 @@ def deliver_order(order_ref: str) -> str:
             return envelope(False, f"Đơn {name} chưa xác nhận (trạng thái nháp). "
                                    f"Hãy xác nhận đơn trước khi giao hàng.")
 
-        pickings = []
-        if so["picking_ids"]:
-            # Chỉ phiếu XUẤT — bỏ phiếu trả hàng/incoming của cùng đơn.
-            pickings = odoo("stock.picking", "search_read",
-                            [[["id", "in", so["picking_ids"]],
-                              ["picking_type_code", "=", "outgoing"]]],
-                            {"fields": ["id", "name", "state"]})
-        pending = [p for p in pickings if p["state"] not in ("done", "cancel")]
-        if not pending:
+        status, val = _validate_order_pickings(so["picking_ids"], "outgoing")
+        if status == "none":
             # Pass-through: dịch vụ / giao ngay / đã giao đủ — chuỗi vẫn mời
             # bước "Tạo hóa đơn" tiếp theo.
             return envelope(True, f"Đơn {name} không có phiếu cần giao "
                                   f"(dịch vụ hoặc đã giao đủ).",
                             ref=name, model="sale.order", res_id=so["id"],
                             state="sale")
-
-        assigned = [p for p in pending if p["state"] == "assigned"]
-        if not assigned:
-            states = ", ".join(sorted({p["state"] for p in pending}))
+        if status == "not_ready":
             return envelope(False,
                             f"Phiếu giao của đơn {name} chưa reserve đủ hàng "
-                            f"(trạng thái: {states}). Kiểm tra tồn kho trước khi giao.")
-
-        for p in assigned:
-            # Odoo 19: phiếu 'assigned' đã auto-set done-qty = reserved nên
-            # button_validate chạy thẳng; dict trả về = wizard → dừng an toàn.
-            result = odoo("stock.picking", "button_validate", [[p["id"]]])
-            if isinstance(result, dict):
-                return envelope(False,
-                                f"Phiếu {p['name']} cần thao tác bổ sung trên Odoo "
-                                f"(wizard không hỗ trợ qua API). Vui lòng xử lý trực tiếp.")
-
-        return envelope(True, f"Đã giao hàng cho đơn {name} ({len(assigned)} phiếu).",
+                            f"(trạng thái: {val}). Kiểm tra tồn kho trước khi giao.")
+        if status == "wizard":
+            return envelope(False,
+                            f"Phiếu {val} cần thao tác bổ sung trên Odoo "
+                            f"(wizard không hỗ trợ qua API). Vui lòng xử lý trực tiếp.")
+        return envelope(True, f"Đã giao hàng cho đơn {name} ({val} phiếu).",
                         ref=name, model="sale.order", res_id=so["id"], state="sale")
     except Exception as e:  # noqa: BLE001 — không exception nào xuyên qua MCP tool
         return envelope(False, f"Lỗi khi giao hàng cho đơn {order_ref}: {e}")
+
+
+@mcp.tool()
+def receive_order(order_ref: str) -> str:
+    """Nhận hàng cho một đơn mua ĐÃ XÁC NHẬN: xác nhận mọi phiếu nhập kho
+    (stock.picking) đã sẵn sàng của đơn. Đơn không có phiếu cần nhận
+    (dịch vụ / đã nhận đủ) được coi là hoàn tất — chuỗi đi tiếp bước
+    lập hóa đơn NCC. YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        order_ref: Mã đơn mua, ví dụ "P00003".
+    """
+    try:
+        rows = odoo("purchase.order", "search_read",
+                    [[["name", "=", order_ref]]],
+                    {"fields": ["id", "name", "state", "picking_ids"],
+                     "limit": 2})
+        if not rows:
+            return envelope(False, f"Không tìm thấy đơn mua '{order_ref}'.")
+        if len(rows) > 1:
+            return envelope(False,
+                            f"Có nhiều đơn mua tên '{order_ref}'. Vui lòng nêu rõ hơn.")
+
+        po = rows[0]
+        name = po["name"]
+        if po["state"] not in ("purchase", "done"):
+            return envelope(False, f"Đơn mua {name} chưa xác nhận. "
+                                   f"Hãy xác nhận đơn trước khi nhận hàng.")
+
+        status, val = _validate_order_pickings(po["picking_ids"], "incoming")
+        if status == "none":
+            return envelope(True, f"Đơn mua {name} không có phiếu cần nhận "
+                                  f"(dịch vụ hoặc đã nhận đủ).",
+                            ref=name, model="purchase.order", res_id=po["id"],
+                            state="purchase")
+        if status == "not_ready":
+            return envelope(False,
+                            f"Phiếu nhập của đơn mua {name} chưa sẵn sàng nhận "
+                            f"(trạng thái: {val}).")
+        if status == "wizard":
+            return envelope(False,
+                            f"Phiếu {val} cần thao tác bổ sung trên Odoo "
+                            f"(wizard không hỗ trợ qua API). Vui lòng xử lý trực tiếp.")
+        return envelope(True, f"Đã nhận hàng cho đơn mua {name} ({val} phiếu).",
+                        ref=name, model="purchase.order", res_id=po["id"],
+                        state="purchase")
+    except Exception as e:  # noqa: BLE001 — không exception nào xuyên qua MCP tool
+        return envelope(False, f"Lỗi khi nhận hàng cho đơn mua {order_ref}: {e}")
 
 
 def _resolve_partner(name, kind_label, hint):

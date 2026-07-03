@@ -10,7 +10,8 @@ REMOVED = ["get_late_orders", "search_orders", "get_inventory", "search_customer
            "get_manufacturing_orders", "get_bom"]
 KEPT = ["create_quotation", "create_rfq", "confirm_sale_order",
         "confirm_purchase_order", "post_invoice", "validate_picking",
-        "inventory_adjustment", "create_invoice_from_order", "deliver_order"]
+        "inventory_adjustment", "create_invoice_from_order", "deliver_order",
+        "receive_order"]
 
 
 def test_read_tools_removed_do_tools_present(monkeypatch):
