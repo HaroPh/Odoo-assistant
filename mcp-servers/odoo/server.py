@@ -42,6 +42,7 @@ ODOO_METHOD_OPERATION_MAP = {
     # CREATE — Phase 3: cần confirmation
     "create": "create", "copy": "create", "name_create": "create",
     "create_invoices": "create",
+    "action_create_invoice": "create",
     # WRITE — Phase 3: cần confirmation
     "write": "write", "toggle_active": "write",
     "action_archive": "write", "message_post": "write",
@@ -578,6 +579,58 @@ def receive_order(order_ref: str) -> str:
                         state="purchase")
     except Exception as e:  # noqa: BLE001 — không exception nào xuyên qua MCP tool
         return envelope(False, f"Lỗi khi nhận hàng cho đơn mua {order_ref}: {e}")
+
+
+@mcp.tool()
+def create_bill_from_po(order_ref: str) -> str:
+    """Tạo hóa đơn nhà cung cấp (account.move nháp) từ một đơn mua ĐÃ XÁC NHẬN
+    và ĐÃ NHẬN HÀNG. Chỉ tạo nháp — phát hành là bước riêng (post_invoice).
+    Bill Date được đặt = hôm nay (Odoo bắt buộc trước khi phát hành).
+    YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        order_ref: Mã đơn mua, ví dụ "P00003".
+    """
+    try:
+        rows = odoo("purchase.order", "search_read",
+                    [[["name", "=", order_ref]]],
+                    {"fields": ["id", "name", "state", "invoice_status",
+                                "invoice_ids"], "limit": 2})
+        if not rows:
+            return envelope(False, f"Không tìm thấy đơn mua '{order_ref}'.")
+        if len(rows) > 1:
+            return envelope(False,
+                            f"Có nhiều đơn mua tên '{order_ref}'. Vui lòng nêu rõ hơn.")
+
+        po = rows[0]
+        name = po["name"]
+        if po["state"] not in ("purchase", "done"):
+            return envelope(False, f"Đơn mua {name} chưa xác nhận. "
+                                   f"Hãy xác nhận đơn trước khi lập hóa đơn.")
+        if po["invoice_status"] != "to invoice":
+            return envelope(False,
+                            f"Chưa có gì để lập hóa đơn NCC cho đơn mua {name} "
+                            f"(chưa nhận hàng, hoặc đã lập đủ).")
+
+        before = set(po["invoice_ids"] or [])
+        # action_create_invoice trả action dict — không tin return value; verify
+        # bằng đọc lại invoice_ids (verified-live 2026-07-03 trên P00015).
+        odoo("purchase.order", "action_create_invoice", [[po["id"]]])
+        after = odoo("purchase.order", "read", [[po["id"]]],
+                     {"fields": ["invoice_ids"]})
+        new_ids = [i for i in (after[0]["invoice_ids"] if after else [])
+                   if i not in before]
+        if not new_ids:
+            return envelope(False, f"Không tạo được hóa đơn cho đơn mua {name} — "
+                                   f"vui lòng kiểm tra trên Odoo.")
+        # Bill Date bắt buộc trước khi post (verified-live: "The Bill/Refund
+        # date is required to validate this document.")
+        odoo("account.move", "write", [new_ids, {"invoice_date": today_iso()}])
+        return envelope(True, f"Đã tạo hóa đơn NCC (nháp) cho đơn mua {name}.",
+                        ref=None, model="account.move", res_id=max(new_ids),
+                        state="draft")
+    except Exception as e:  # noqa: BLE001 — không exception nào xuyên qua MCP tool
+        return envelope(False, f"Lỗi khi tạo hóa đơn cho đơn mua {order_ref}: {e}")
 
 
 def _resolve_partner(name, kind_label, hint):
