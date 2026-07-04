@@ -9,7 +9,8 @@ from langchain.agents import create_agent as _create_agent
 from langgraph.types import interrupt as _interrupt
 
 from .state import ERPAgentState
-from .prompts import INTENT_ROUTER_PROMPT, SYSTEM_PROMPT, WRITE_PLANNER_PROMPT, WRITE_CONFIRM_PREFIX
+from .prompts import (INTENT_ROUTER_PROMPT, SYSTEM_PROMPT, WRITE_PLANNER_PROMPT,
+                      WRITE_CONFIRM_PREFIX, render_working_context)
 from .write_registry import COORDINATED_TOOLS
 from ..rag.retrieve import retrieve
 from .synthesis import synthesize, SAFE_MSG
@@ -103,9 +104,13 @@ def make_erp_write_planner_node(llm):
                 )
             )], "pending_action": None}
 
-        # Plan the action
+        # Plan the action — invariant A: ONE effective system prompt; context
+        # first so the JSON-format block stays last.
+        wc = state.get("working_context")
+        system = (render_working_context(wc) + "\n\n" + WRITE_PLANNER_PROMPT) \
+            if wc else WRITE_PLANNER_PROMPT
         response = await llm.ainvoke([
-            SystemMessage(content=WRITE_PLANNER_PROMPT),
+            SystemMessage(content=system),
             *state["messages"],
         ])
         try:
@@ -115,12 +120,22 @@ def make_erp_write_planner_node(llm):
             return {"messages": [AIMessage(content="Không thể xác định thao tác cần thực hiện. Vui lòng mô tả rõ hơn.")],
                     "pending_action": None}
 
+        # Invariant C tầng 2: mã tường minh trong lời user thắng context.
+        last_human = next((m.content for m in reversed(state["messages"])
+                           if m.type == "human"), "")
+        plan = enforce_explicit_ref(plan, last_human)
+
         # Coordinated writes own their own resolution + confirm; don't interrupt here.
         if plan.get("tool") in COORDINATED_TOOLS:
             return {"pending_action": plan}
 
         summary = plan.get("summary") or plan.get("tool") or "thao tác"
-        question = WRITE_CONFIRM_PREFIX + f"**{summary}**\n\nXác nhận? (có / không)"
+        # Invariant C tầng 3: hiện tool+args TẤT ĐỊNH — user luôn thấy ref thật
+        # trước khi "có", kể cả khi summary của LLM mơ hồ.
+        args_line = ", ".join(f"{k}={v}" for k, v in (plan.get("args") or {}).items())
+        question = WRITE_CONFIRM_PREFIX + (f"**{summary}**\n"
+                                           f"({plan.get('tool')}: {args_line})\n\n"
+                                           f"Xác nhận? (có / không)")
         ttl = int(os.environ.get("CONFIRMATION_TTL_SECONDS", "300"))
         confirmed = _interrupt({
             "question": question,
