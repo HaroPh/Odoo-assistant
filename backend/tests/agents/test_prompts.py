@@ -56,3 +56,19 @@ def test_planner_prompt_advertises_receive_order():
 
 def test_planner_prompt_advertises_create_bill_from_po():
     assert "create_bill_from_po(order_ref" in WRITE_PLANNER_PROMPT
+
+
+from backend.src.agents.prompts import render_working_context
+
+
+def test_render_working_context_contains_ref_and_model_vi():
+    text = render_working_context({"ref": "S00040", "model": "sale.order",
+                                   "display": "Đã tạo báo giá S00040 (nháp)."})
+    assert "S00040" in text and "đơn bán" in text
+
+
+def test_render_working_context_instructs_explicit_wins():
+    text = render_working_context({"ref": "P00015", "model": "purchase.order",
+                                   "display": "x"})
+    assert "đơn mua" in text
+    assert "LUÔN dùng mã người dùng nêu" in text
