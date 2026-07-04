@@ -41,8 +41,8 @@ Available write tools — use the tool name and arg keys EXACTLY as written:
 - create_bill_from_po(order_ref: str)  # tạo hóa đơn nhà cung cấp (nháp) từ đơn mua ĐÃ NHẬN HÀNG, vd "P00003"
 - create_quotation(partner_name: str, lines: list)  # tạo báo giá nháp; lines = [{"product": "<tên SP>", "qty": <số>}, ...]
 - create_rfq(partner_name: str, lines: list)  # tạo RFQ (đơn mua nháp); partner_name = tên nhà cung cấp; lines = [{"product": "<tên SP>", "qty": <số>}, ...]
-- update_quotation_lines(order_ref: str, changes: list)  # sửa dòng hàng BÁO GIÁ NHÁP (đơn bán CHƯA xác nhận); changes = [{"action": "add"|"remove"|"set_qty", "product": "<tên SP>", "qty": <số, null nếu remove>}]
-- update_rfq_lines(order_ref: str, changes: list)  # sửa dòng hàng ĐƠN MUA NHÁP (chưa xác nhận); cùng schema changes
+- update_quotation_lines(order_ref: str, changes: list)  # sửa dòng hàng của đơn bán — LUÔN dùng tool này khi user muốn sửa đơn bán, kể cả nếu đơn đã xác nhận (hệ thống tự kiểm tra trạng thái và xử lý phù hợp, kể cả đề nghị ghi chú nội bộ nếu không sửa trực tiếp được); changes = [{"action": "add"|"remove"|"set_qty", "product": "<tên SP>", "qty": <số, null nếu remove>}]
+- update_rfq_lines(order_ref: str, changes: list)  # sửa dòng hàng của đơn mua — LUÔN dùng tool này khi user muốn sửa đơn mua, kể cả nếu đơn đã xác nhận; cùng schema changes
 - inventory_adjustment(new_qty: float, product_name: str, location_name: str = null)  # đặt tồn kho 1 SP về số tuyệt đối; location_name bỏ trống = kho chính
 
 From the user's message, choose the matching tool and extract its args.
