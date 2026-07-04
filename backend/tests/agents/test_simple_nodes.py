@@ -97,3 +97,56 @@ async def test_erp_read_node_invokes_agent(monkeypatch):
     result = await node(state)
     # Should return only the new AI message
     assert any("trễ" in m.content for m in result["messages"])
+
+
+@pytest.mark.asyncio
+async def test_erp_read_context_yields_single_effective_system_prompt(monkeypatch):
+    # Invariant A: ONE system prompt containing render + SYSTEM_PROMPT (context
+    # first, so SYSTEM_PROMPT's trailing /no_think stays last); state messages
+    # passed through untouched; context never leaks into returned messages.
+    from unittest.mock import AsyncMock, MagicMock
+    import backend.src.agents.nodes as nodes_mod
+    from backend.src.agents.nodes import make_erp_read_node
+    from backend.src.agents.prompts import SYSTEM_PROMPT, render_working_context
+
+    wc = {"ref": "S00040", "model": "sale.order", "display": "x"}
+    captured = {}
+    mock_agent = MagicMock()
+    mock_agent.ainvoke = AsyncMock(return_value={
+        "messages": [HumanMessage(content="q"), AIMessage(content="Đã giao 2/2.")]})
+
+    def fake_create(llm, tools, system_prompt=None):
+        captured["prompt"] = system_prompt
+        return mock_agent
+
+    monkeypatch.setattr(nodes_mod, "_create_agent", fake_create)
+    node = make_erp_read_node(llm=MagicMock(), tools=[])
+    state = ERPAgentState(messages=[HumanMessage(content="đơn đó giao chưa?")],
+                          intent="erp_read", pending_action=None, confirmed=None,
+                          working_context=wc)
+    result = await node(state)
+    assert captured["prompt"].startswith(render_working_context(wc))
+    assert SYSTEM_PROMPT in captured["prompt"]
+    sent_msgs = mock_agent.ainvoke.await_args[0][0]["messages"]
+    assert sent_msgs == state["messages"]          # no extra SystemMessage injected
+    assert all("Ngữ cảnh phiên làm việc" not in m.content
+               for m in result["messages"])        # no leak into state
+
+
+@pytest.mark.asyncio
+async def test_erp_read_without_context_uses_base_prompt(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+    import backend.src.agents.nodes as nodes_mod
+    from backend.src.agents.nodes import make_erp_read_node
+    from backend.src.agents.prompts import SYSTEM_PROMPT
+
+    captured = {}
+    mock_agent = MagicMock()
+    mock_agent.ainvoke = AsyncMock(return_value={"messages": [
+        HumanMessage(content="q"), AIMessage(content="ok")]})
+    monkeypatch.setattr(nodes_mod, "_create_agent",
+                        lambda llm, tools, system_prompt=None:
+                        captured.update(prompt=system_prompt) or mock_agent)
+    node = make_erp_read_node(llm=MagicMock(), tools=[])
+    await node(_state("có đơn nào trễ không?"))
+    assert captured["prompt"] == SYSTEM_PROMPT

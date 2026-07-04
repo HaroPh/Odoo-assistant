@@ -46,9 +46,15 @@ def make_intent_router_node(llm):
 # ── erp_read ─────────────────────────────────────────────────────────────────
 
 def make_erp_read_node(llm, tools):
-    agent = _create_agent(llm, tools, system_prompt=SYSTEM_PROMPT)
-
     async def erp_read(state: ERPAgentState) -> dict:
+        # Invariant A: MỘT system prompt hiệu dụng duy nhất. Context đặt TRƯỚC
+        # SYSTEM_PROMPT để '/no_think' giữ vị trí cuối. Build agent per-call là
+        # cách thoả invariant (chi phí ~ms, stack local); context KHÔNG được
+        # chèn vào messages nên không thể leak vào state.
+        wc = state.get("working_context")
+        prompt = (render_working_context(wc) + "\n\n" + SYSTEM_PROMPT) \
+            if wc else SYSTEM_PROMPT
+        agent = _create_agent(llm, tools, system_prompt=prompt)
         result = await agent.ainvoke({"messages": state["messages"]})
         # Return only messages added by the agent (skip the input messages)
         new_msgs = result["messages"][len(state["messages"]):]
