@@ -1,6 +1,8 @@
 # backend/src/agents/prompts.py
 from datetime import date
 
+from .working_context import ORDER_MODELS
+
 SYSTEM_PROMPT = f"""Bạn là trợ lý ERP nội bộ, trả lời bằng tiếng Việt.
 Hôm nay là {date.today().isoformat()}.
 Khi cần dữ liệu ERP, hãy GỌI TOOL phù hợp — không bịa số liệu:
@@ -78,3 +80,16 @@ Quy tắc:
 - KHÔNG thực hiện thao tác ghi/tạo/sửa/xác nhận.
 - KHÔNG tự viết mục "Nguồn"/trích dẫn — phần trích dẫn sẽ được thêm tự động.
 - Trả lời ngắn gọn bằng tiếng Việt. /no_think"""
+
+
+def render_working_context(wc: dict) -> str:
+    """Khối ngữ cảnh ghép vào system prompt. Đặt TRƯỚC prompt gốc (caller làm)
+    để chỉ thị định dạng / '/no_think' của prompt gốc giữ vị trí cuối."""
+    wc = wc or {}
+    model_vi = ORDER_MODELS.get(wc.get("model"), "đơn")
+    return (f'Ngữ cảnh phiên làm việc: đơn gần nhất là {wc.get("ref", "?")} ({model_vi}) '
+            f'— "{wc.get("display", "")}".\n'
+            'Chỉ dùng mã này khi người dùng ám chỉ đơn hiện tại ("đơn đó", '
+            '"đơn vừa tạo", không nêu mã).\n'
+            "Nếu người dùng nêu mã cụ thể, LUÔN dùng mã người dùng nêu. "
+            "Nếu yêu cầu không liên quan, bỏ qua ngữ cảnh này.")
