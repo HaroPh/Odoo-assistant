@@ -36,10 +36,11 @@ def _patch(monkeypatch, rows, post_capture=None, search_raises=None):
 
 def test_flag_rejects_disallowed_model(monkeypatch):
     posts = []
-    _patch(monkeypatch, rows=[{"id": 1, "name": "X", "state": "sale"}], post_capture=posts)
+    calls = _patch(monkeypatch, rows=[{"id": 1, "name": "X", "state": "sale"}], post_capture=posts)
     data = _env(fn("flag_order_for_review")("res.partner", "S001", "hack"))
     assert data["ok"] is False
-    assert posts == []  # never touched Odoo
+    assert calls == []  # no Odoo calls of any kind for disallowed model
+    assert posts == []
 
 
 def test_flag_not_found(monkeypatch):
