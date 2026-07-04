@@ -187,3 +187,63 @@ async def test_envelope_result_sets_working_context(monkeypatch):
     res = await graph.ainvoke(Command(resume=True), cfg)
     assert res["working_context"]["ref"] == "S00099"
     assert res["working_context"]["model"] == "sale.order"
+
+
+@pytest.mark.asyncio
+async def test_write_disabled_gate_never_wipes_working_context(monkeypatch):
+    # Coverage-gap fix: order_node had zero anti-wipe tests across its 8
+    # early-exit paths. This exercises the write-disabled gate — the
+    # earliest early exit, no interrupt involved — by calling the node
+    # function directly (not through a compiled graph) so we can assert on
+    # its raw returned update dict: the key must be ABSENT, never None.
+    # (Through a compiled graph an omitted key keeps its prior channel
+    # value rather than disappearing from the result — that persistence IS
+    # the feature — so "absent from the raw return" is the node-level
+    # contract this test pins, not "absent from the final graph state".)
+    monkeypatch.delenv("WRITE_ACTIONS_ENABLED", raising=False)
+    node = co.make_create_order_node(MagicMock(), [_fake_tool({})])
+    state = _state([{"product": "Tủ", "qty": 1}])
+    state["working_context"] = {"ref": "S00031", "model": "sale.order", "display": "x"}
+    out = await node(state)
+    assert "working_context" not in out
+
+
+def _raising_create_tool():
+    t = MagicMock()
+    t.name = "create_quotation"
+
+    async def ainvoke(args):
+        raise RuntimeError("boom")
+
+    t.ainvoke = ainvoke
+    return t
+
+
+@pytest.mark.asyncio
+async def test_create_tool_exception_never_wipes_working_context(monkeypatch):
+    # Coverage-gap fix: the tool-raises early exit (step 4, after the draft
+    # is confirmed) was untested for anti-wipe. This path runs behind a real
+    # LangGraph interrupt, so — unlike the direct-call test above — we go
+    # through the compiled graph. There, an omitted key in the node's return
+    # doesn't vanish from the result; the channel keeps its PRIOR value
+    # (verified empirically against this repo's langgraph version). So the
+    # correct assertion here is that working_context survives UNCHANGED,
+    # proving the exception path never clobbers it — the graph-level
+    # manifestation of the same omit-vs-None contract.
+    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(co.sales, "find_customer",
+                        lambda *a, **k: _ok([{"id": 41, "name": "Azur", "score": 1}], False))
+    monkeypatch.setattr(co.inventory, "find_product",
+                        lambda *a, **k: _ok([{"id": 552, "name": "Tủ", "score": 1}], False))
+    monkeypatch.setattr(co.sales, "get_product_price",
+                        lambda *a, **k: {"status": "success",
+                                         "data": {"price": 100000.0}, "display": "x"})
+    prior_wc = {"ref": "S00031", "model": "sale.order", "display": "x"}
+    graph = _graph(co.make_create_order_node(MagicMock(), [_raising_create_tool()]))
+    cfg = {"configurable": {"thread_id": "t-wc-raise"}}
+    state = _state([{"product": "Tủ", "qty": 3}])
+    state["working_context"] = prior_wc
+    await graph.ainvoke(state, cfg)
+    res = await graph.ainvoke(Command(resume=True), cfg)
+    assert "Lỗi khi tạo đơn" in res["messages"][-1].content
+    assert res["working_context"] == prior_wc

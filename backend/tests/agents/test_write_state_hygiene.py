@@ -160,3 +160,16 @@ async def test_executor_plain_string_tool_omits_working_context_key():
     out = await node({"confirmed": True,
                       "pending_action": {"tool": "validate_picking", "args": {}}})
     assert "working_context" not in out
+
+
+@pytest.mark.asyncio
+async def test_executor_exception_path_never_wipes_working_context():
+    # Coverage-gap fix: test_executor_early_exits_never_wipe_working_context
+    # only exercises cancel + missing-tool; the tool.ainvoke-raises branch
+    # needs its own anti-wipe check with a pre-populated working_context.
+    node = make_erp_write_executor_node([_raising_tool()])
+    out = await node({"confirmed": True,
+                      "pending_action": {"tool": "confirm_sale_order", "args": {}},
+                      "working_context": {"ref": "S00031",
+                                          "model": "sale.order", "display": "x"}})
+    assert "working_context" not in out
