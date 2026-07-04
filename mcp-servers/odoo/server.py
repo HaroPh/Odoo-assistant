@@ -843,6 +843,41 @@ def update_rfq_lines(order_ref: str, ops: list | None = None) -> str:
         return envelope(False, f"Lỗi khi sửa đơn mua {order_ref}: {e}")
 
 
+_FLAGGABLE_MODELS = ("sale.order", "purchase.order")
+
+
+@mcp.tool()
+def flag_order_for_review(model: str, order_ref: str, note: str) -> str:
+    """Ghi một ghi chú nội bộ (message_post) lên chatter của đơn để báo quản lý —
+    dùng khi đơn ĐÃ xác nhận không sửa trực tiếp được. Chỉ áp dụng cho sale.order /
+    purchase.order (Invariant #6).
+
+    Args:
+        model: "sale.order" | "purchase.order".
+        order_ref: Mã đơn, ví dụ "S00012" / "P00003".
+        note: Nội dung ghi chú (tiếng Việt).
+    """
+    try:
+        if model not in _FLAGGABLE_MODELS:
+            return envelope(False, "Model không được hỗ trợ.")
+        rows = odoo(model, "search_read", [[["name", "=", order_ref]]],
+                    {"fields": ["id", "name", "state"], "limit": 2})
+        if not rows:
+            return envelope(False, f"Không tìm thấy đơn '{order_ref}'.")
+        if len(rows) > 1:
+            return envelope(False, f"Có nhiều đơn tên '{order_ref}'. Vui lòng nêu rõ hơn.")
+        order = rows[0]
+        # message_post may return a recordset that XML-RPC can't marshal (gateway
+        # then returns None post-commit). We don't use the return value.
+        odoo(model, "message_post", [[order["id"]]], {"body": note})
+        return envelope(True,
+                        f"Đã ghi chú nội bộ trên đơn {order['name']} để báo quản lý.",
+                        ref=order["name"], model=model, res_id=order["id"],
+                        state=order["state"])
+    except Exception as e:  # noqa: BLE001
+        return envelope(False, f"Lỗi khi ghi chú đơn {order_ref}: {e}")
+
+
 @mcp.tool()
 def inventory_adjustment(new_qty: float, product_name: str = "",
                          location_name: str | None = None, product_id: int = 0) -> str:
