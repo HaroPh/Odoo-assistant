@@ -36,10 +36,12 @@ def test_get_purchase_order_detail_includes_state():
     class TwoCallTransport:
         def __init__(self): self.calls = []
         def call(self, model, method, args, kwargs):
-            self.calls.append((model, method))
+            self.calls.append((model, method, args, kwargs))
             return order_rows if model == "purchase.order" else line_rows
 
     gw = Gateway(TwoCallTransport())
     out = purchase.get_purchase_order_detail("P00009", gw=gw)
     assert out["data"]["order"]["state"] == "draft"
     assert out["data"]["lines"][0]["id"] == 201
+    order_call = next(c for c in gw._t.calls if c[0] == "purchase.order")
+    assert "state" in order_call[3]["fields"]
