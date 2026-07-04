@@ -14,6 +14,7 @@ from .write_registry import COORDINATED_TOOLS
 from ..rag.retrieve import retrieve
 from .synthesis import synthesize, SAFE_MSG
 from .tool_result import _tool_result_text, parse_write_result
+from .working_context import derive_working_context, enforce_explicit_ref
 
 logger = logging.getLogger(__name__)
 
@@ -162,8 +163,14 @@ def make_erp_write_executor_node(tools):
                 content=f"Lỗi khi thực hiện thao tác: {e}"
             )], **cleared}
         display, env = parse_write_result(result)
-        return {"messages": [AIMessage(content=display)],
-                "pending_action": None, "confirmed": None,
-                "last_write": {"tool": name, **env} if env else None}
+        upd = {"messages": [AIMessage(content=display)],
+               "pending_action": None, "confirmed": None,
+               "last_write": {"tool": name, **env} if env else None}
+        wc = derive_working_context(env)
+        if wc:
+            # omit-vs-None: chỉ THÊM key khi có đơn mới — không bao giờ set None
+            # (None sẽ xoá đơn đang nhớ; các path khác cũng phải OMIT key này).
+            upd["working_context"] = wc
+        return upd
 
     return erp_write_executor

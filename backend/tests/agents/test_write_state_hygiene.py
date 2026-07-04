@@ -100,3 +100,63 @@ async def test_planner_write_disabled_clears_pending_action(monkeypatch):
     node = make_erp_write_planner_node(MagicMock())
     out = await node({"messages": []})
     assert out["pending_action"] is None
+
+
+def _order_envelope(ref="S00031"):
+    return json.dumps({"ok": True, "ref": ref, "model": "sale.order",
+                       "res_id": 42, "state": "sale",
+                       "display": f"Đã xác nhận đơn {ref}."}, ensure_ascii=False)
+
+
+def _invoice_envelope():
+    return json.dumps({"ok": True, "ref": None, "model": "account.move",
+                       "res_id": 61, "state": "draft",
+                       "display": "Đã tạo hóa đơn nháp."}, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_executor_order_write_sets_working_context():
+    node = make_erp_write_executor_node(
+        [_tool("confirm_sale_order", _order_envelope())])
+    out = await node({"confirmed": True,
+                      "pending_action": {"tool": "confirm_sale_order",
+                                         "args": {"order_ref": "S00031"}}})
+    assert out["working_context"] == {"ref": "S00031", "model": "sale.order",
+                                      "display": "Đã xác nhận đơn S00031."}
+
+
+@pytest.mark.asyncio
+async def test_executor_invoice_write_omits_working_context_key():
+    # Invoice envelopes must NOT touch the context — key ABSENT (not None),
+    # so LangGraph keeps the previous order in the channel.
+    node = make_erp_write_executor_node(
+        [_tool("create_invoice_from_order", _invoice_envelope())])
+    out = await node({"confirmed": True,
+                      "pending_action": {"tool": "create_invoice_from_order",
+                                         "args": {"order_ref": "S00031"}}})
+    assert "working_context" not in out
+
+
+@pytest.mark.asyncio
+async def test_executor_early_exits_never_wipe_working_context():
+    # Anti-wipe: cancel / missing tool / exception paths must OMIT the key —
+    # returning working_context=None would erase the remembered order.
+    node = make_erp_write_executor_node([])
+    cancel = await node({"confirmed": False, "pending_action": {"tool": "x"},
+                         "working_context": {"ref": "S00031",
+                                             "model": "sale.order", "display": "x"}})
+    assert "working_context" not in cancel
+    missing = await node({"confirmed": True,
+                          "pending_action": {"tool": "ghost", "args": {}},
+                          "working_context": {"ref": "S00031",
+                                              "model": "sale.order", "display": "x"}})
+    assert "working_context" not in missing
+
+
+@pytest.mark.asyncio
+async def test_executor_plain_string_tool_omits_working_context_key():
+    node = make_erp_write_executor_node(
+        [_tool("validate_picking", "Đã xác nhận phiếu WH/OUT/00001.")])
+    out = await node({"confirmed": True,
+                      "pending_action": {"tool": "validate_picking", "args": {}}})
+    assert "working_context" not in out
