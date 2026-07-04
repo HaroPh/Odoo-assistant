@@ -102,3 +102,18 @@ def test_enforce_is_total_on_garbage():
         out = enforce_explicit_ref(plan, "S00007")   # must not raise
         assert out == plan or isinstance(out, dict)
     assert enforce_explicit_ref(_plan(), None) == _plan()
+
+
+def test_enforce_is_total_on_bad_user_text():
+    # Invariant B for the second arg: non-string/non-None user_text must not raise.
+    plan = _plan("S00040")
+    for bad_text in (42, ["S00007"], object(), 3.14, {"ref": "S00007"}):
+        out = enforce_explicit_ref(plan, bad_text)   # must not raise
+        assert out is plan or isinstance(out, dict)
+
+
+def test_enforce_non_dict_plan_returns_same_object():
+    # Pins identity (not just equality) for the one no-op path the garbage
+    # loop doesn't distinguish is-vs-== for.
+    for plan in (None, "x", 42):
+        assert enforce_explicit_ref(plan, "S00007") is plan
