@@ -25,3 +25,21 @@ def test_list_purchase_orders_envelope():
     out = purchase.list_purchase_orders(state="purchase", gw=gw)
     assert out["data"]["count"] == 1
     assert gw._t.calls[0][0] == "purchase.order"
+
+
+def test_get_purchase_order_detail_includes_state():
+    order_rows = [{"id": 9, "name": "P00009", "partner_id": [70, "ACME"],
+                   "amount_total": 500000.0, "state": "draft"}]
+    line_rows = [{"id": 201, "product_id": [553, "Bàn"], "product_qty": 4.0,
+                  "price_unit": 125000.0, "price_subtotal": 500000.0}]
+
+    class TwoCallTransport:
+        def __init__(self): self.calls = []
+        def call(self, model, method, args, kwargs):
+            self.calls.append((model, method))
+            return order_rows if model == "purchase.order" else line_rows
+
+    gw = Gateway(TwoCallTransport())
+    out = purchase.get_purchase_order_detail("P00009", gw=gw)
+    assert out["data"]["order"]["state"] == "draft"
+    assert out["data"]["lines"][0]["id"] == 201

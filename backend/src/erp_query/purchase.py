@@ -36,7 +36,7 @@ def get_purchase_order_detail(ref, *, gw=None):
     gw = gw or default_gateway()
     try:
         orders = gw.search_read("purchase.order", [["name", "=", ref]],
-                                ["id", "name", "partner_id", "amount_total"], limit=2)
+                                ["id", "name", "partner_id", "amount_total", "state"], limit=2)
         if not orders:
             return err(f"Không tìm thấy đơn mua '{ref}'.")
         if len(orders) > 1:

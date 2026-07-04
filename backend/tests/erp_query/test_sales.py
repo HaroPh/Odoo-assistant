@@ -45,3 +45,22 @@ def test_sales_summary_uses_read_group():
     out = sales.sales_summary(period="month", gw=gw)
     assert out["status"] == "success"
     assert gw._t.calls[-1][1] == "read_group"
+
+
+def test_get_sale_order_detail_includes_state():
+    order_rows = [{"id": 7, "name": "S00007", "partner_id": [41, "Azur"],
+                   "amount_total": 320000.0, "state": "draft"}]
+    line_rows = [{"id": 101, "product_id": [552, "Tủ"], "product_uom_qty": 2.0,
+                  "price_unit": 160000.0, "price_subtotal": 320000.0}]
+
+    class TwoCallTransport:
+        def __init__(self): self.calls = []
+        def call(self, model, method, args, kwargs):
+            self.calls.append((model, method))
+            return order_rows if model == "sale.order" else line_rows
+
+    gw = Gateway(TwoCallTransport())
+    out = sales.get_sale_order_detail("S00007", gw=gw)
+    assert out["status"] == "success"
+    assert out["data"]["order"]["state"] == "draft"
+    assert out["data"]["lines"][0]["id"] == 101
