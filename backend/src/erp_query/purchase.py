@@ -36,14 +36,14 @@ def get_purchase_order_detail(ref, *, gw=None):
     gw = gw or default_gateway()
     try:
         orders = gw.search_read("purchase.order", [["name", "=", ref]],
-                                ["id", "name", "partner_id", "amount_total"], limit=2)
+                                ["id", "name", "partner_id", "amount_total", "state"], limit=2)
         if not orders:
             return err(f"Không tìm thấy đơn mua '{ref}'.")
         if len(orders) > 1:
             return err(f"Có nhiều đơn mua tên '{ref}'.")
         o = orders[0]
         lines = gw.search_read("purchase.order.line", [["order_id", "=", o["id"]]],
-                               ["product_id", "product_qty", "price_unit", "price_subtotal"],
+                               ["id", "product_id", "product_qty", "price_unit", "price_subtotal"],
                                order="id asc", limit=100)
     except Exception as e:                                  # noqa: BLE001
         return err(f"Lỗi tra chi tiết đơn mua: {e}")

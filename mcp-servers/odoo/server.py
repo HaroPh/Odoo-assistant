@@ -763,6 +763,123 @@ def create_rfq(supplier_name: str = "", lines: list | None = None,
                     ref=name, model="purchase.order", res_id=pid_, state="draft")
 
 
+_EDITABLE_STATES = ("draft", "sent")
+
+
+def _apply_line_ops(model: str, qty_field: str, order_ref: str, ops: list) -> str:
+    """Validate + apply o2m commands to a DRAFT order's lines. Shared body for
+    update_quotation_lines / update_rfq_lines — each passes its own model +
+    qty_field (Invariant #1). State-gate here is the real gate (Invariant #4)."""
+    rows = odoo(model, "search_read", [[["name", "=", order_ref]]],
+                {"fields": ["id", "name", "state"], "limit": 2})
+    if not rows:
+        return envelope(False, f"Không tìm thấy đơn '{order_ref}'.")
+    if len(rows) > 1:
+        return envelope(False, f"Có nhiều đơn tên '{order_ref}'. Vui lòng nêu rõ hơn.")
+    order = rows[0]
+    name, state = order["name"], order["state"]
+    if state not in _EDITABLE_STATES:
+        return envelope(False, f"Đơn {name} đã xác nhận, không thể sửa.")
+    if not ops:
+        return envelope(False, "Không có thay đổi nào để áp dụng.")
+
+    cmds = []
+    for op in ops:
+        kind = op.get("op")
+        if kind == "add":
+            pid, qty = op.get("product_id"), op.get("qty")
+            if not isinstance(pid, int) or not isinstance(qty, (int, float)) or qty <= 0:
+                return envelope(False, "Lệnh thêm dòng không hợp lệ.")
+            cmds.append((0, 0, {"product_id": pid, qty_field: qty}))
+        elif kind == "remove":
+            lid = op.get("line_id")
+            if not isinstance(lid, int):
+                return envelope(False, "Lệnh xóa dòng không hợp lệ.")
+            cmds.append((2, lid, 0))
+        elif kind == "set_qty":
+            lid, qty = op.get("line_id"), op.get("qty")
+            if not isinstance(lid, int) or not isinstance(qty, (int, float)) or qty <= 0:
+                return envelope(False, "Lệnh đổi số lượng không hợp lệ.")
+            cmds.append((1, lid, {qty_field: qty}))
+        else:
+            return envelope(False, f"Thao tác không hỗ trợ: {kind!r}.")
+
+    odoo(model, "write", [[order["id"]], {"order_line": cmds}])
+    label = "báo giá" if model == "sale.order" else "đơn mua"
+    return envelope(True, f"Đã sửa {label} {name} ({len(cmds)} thay đổi).",
+                    ref=name, model=model, res_id=order["id"], state=state)
+
+
+@mcp.tool()
+def update_quotation_lines(order_ref: str, ops: list | None = None) -> str:
+    """Sửa dòng hàng của BÁO GIÁ (sale.order). Chỉ áp dụng được cho đơn nháp
+    (draft/sent); nếu đơn đã xác nhận, tool trả về lỗi và tầng điều phối sẽ đề nghị
+    ghi chú nội bộ. ops đã resolve theo ID; coordinator dựng ops, KHÔNG để LLM tự dựng.
+    YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        order_ref: Mã đơn bán, ví dụ "S00012".
+        ops: [{"op":"add","product_id":int,"qty":float} |
+              {"op":"remove","line_id":int} |
+              {"op":"set_qty","line_id":int,"qty":float}]
+    """
+    try:
+        return _apply_line_ops("sale.order", "product_uom_qty", order_ref, ops or [])
+    except Exception as e:  # noqa: BLE001
+        return envelope(False, f"Lỗi khi sửa báo giá {order_ref}: {e}")
+
+
+@mcp.tool()
+def update_rfq_lines(order_ref: str, ops: list | None = None) -> str:
+    """Sửa dòng hàng của ĐƠN MUA (purchase.order). Chỉ áp dụng được cho đơn nháp
+    (draft/sent); nếu đơn đã xác nhận, tool trả về lỗi và tầng điều phối sẽ đề nghị
+    ghi chú nội bộ. ops đã resolve theo ID. YÊU CẦU XÁC NHẬN trước khi gọi.
+
+    Args:
+        order_ref: Mã đơn mua, ví dụ "P00003".
+        ops: cùng schema với update_quotation_lines.
+    """
+    try:
+        return _apply_line_ops("purchase.order", "product_qty", order_ref, ops or [])
+    except Exception as e:  # noqa: BLE001
+        return envelope(False, f"Lỗi khi sửa đơn mua {order_ref}: {e}")
+
+
+_FLAGGABLE_MODELS = ("sale.order", "purchase.order")
+
+
+@mcp.tool()
+def flag_order_for_review(model: str, order_ref: str, note: str) -> str:
+    """Ghi một ghi chú nội bộ (message_post) lên chatter của đơn để báo quản lý —
+    dùng khi đơn ĐÃ xác nhận không sửa trực tiếp được. Chỉ áp dụng cho sale.order /
+    purchase.order (Invariant #6).
+
+    Args:
+        model: "sale.order" | "purchase.order".
+        order_ref: Mã đơn, ví dụ "S00012" / "P00003".
+        note: Nội dung ghi chú (tiếng Việt).
+    """
+    try:
+        if model not in _FLAGGABLE_MODELS:
+            return envelope(False, "Model không được hỗ trợ.")
+        rows = odoo(model, "search_read", [[["name", "=", order_ref]]],
+                    {"fields": ["id", "name", "state"], "limit": 2})
+        if not rows:
+            return envelope(False, f"Không tìm thấy đơn '{order_ref}'.")
+        if len(rows) > 1:
+            return envelope(False, f"Có nhiều đơn tên '{order_ref}'. Vui lòng nêu rõ hơn.")
+        order = rows[0]
+        # message_post may return a recordset that XML-RPC can't marshal (gateway
+        # then returns None post-commit). We don't use the return value.
+        odoo(model, "message_post", [[order["id"]]], {"body": note})
+        return envelope(True,
+                        f"Đã ghi chú nội bộ trên đơn {order['name']} để báo quản lý.",
+                        ref=order["name"], model=model, res_id=order["id"],
+                        state=order["state"])
+    except Exception as e:  # noqa: BLE001
+        return envelope(False, f"Lỗi khi ghi chú đơn {order_ref}: {e}")
+
+
 @mcp.tool()
 def inventory_adjustment(new_qty: float, product_name: str = "",
                          location_name: str | None = None, product_id: int = 0) -> str:

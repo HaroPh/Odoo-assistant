@@ -47,6 +47,7 @@ def test_next_steps_chain_is_linear_and_terminal():
         "create_invoice_from_order",
         "create_rfq", "confirm_purchase_order", "receive_order",
         "create_bill_from_po",
+        "update_quotation_lines", "update_rfq_lines",
     }
     lw = {"tool": "x", "ok": True, "ref": "S00031", "model": "sale.order",
           "res_id": 42, "state": "draft", "display": "x"}
@@ -54,6 +55,11 @@ def test_next_steps_chain_is_linear_and_terminal():
     assert (NEXT_STEPS["create_quotation"].tool, NEXT_STEPS["create_quotation"].label) \
         == ("confirm_sale_order", "Xác nhận báo giá")
     assert NEXT_STEPS["create_quotation"].args(lw) == {"order_ref": "S00031"}
+    # editing a draft's lines re-enters the same "confirm" next step as creation
+    assert (NEXT_STEPS["update_quotation_lines"].tool,
+            NEXT_STEPS["update_quotation_lines"].label) \
+        == ("confirm_sale_order", "Xác nhận báo giá")
+    assert NEXT_STEPS["update_quotation_lines"].args(lw) == {"order_ref": "S00031"}
     assert (NEXT_STEPS["confirm_sale_order"].tool, NEXT_STEPS["confirm_sale_order"].label) \
         == ("deliver_order", "Giao hàng")
     assert NEXT_STEPS["confirm_sale_order"].args(lw) == {"order_ref": "S00031"}
@@ -70,6 +76,10 @@ def test_next_steps_chain_is_linear_and_terminal():
     assert (NEXT_STEPS["create_rfq"].tool, NEXT_STEPS["create_rfq"].label) \
         == ("confirm_purchase_order", "Xác nhận đơn mua")
     assert NEXT_STEPS["create_rfq"].args(plw) == {"order_ref": "P00040"}
+    assert (NEXT_STEPS["update_rfq_lines"].tool,
+            NEXT_STEPS["update_rfq_lines"].label) \
+        == ("confirm_purchase_order", "Xác nhận đơn mua")
+    assert NEXT_STEPS["update_rfq_lines"].args(plw) == {"order_ref": "P00040"}
     assert (NEXT_STEPS["confirm_purchase_order"].tool,
             NEXT_STEPS["confirm_purchase_order"].label) \
         == ("receive_order", "Nhận hàng")
