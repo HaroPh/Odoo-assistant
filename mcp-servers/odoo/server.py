@@ -812,8 +812,9 @@ def _apply_line_ops(model: str, qty_field: str, order_ref: str, ops: list) -> st
 
 @mcp.tool()
 def update_quotation_lines(order_ref: str, ops: list | None = None) -> str:
-    """Sửa dòng hàng của BÁO GIÁ NHÁP (sale.order, draft/sent). Chỉ dùng khi đơn
-    CHƯA xác nhận. ops đã resolve theo ID; coordinator dựng ops, KHÔNG để LLM tự dựng.
+    """Sửa dòng hàng của BÁO GIÁ (sale.order). Chỉ áp dụng được cho đơn nháp
+    (draft/sent); nếu đơn đã xác nhận, tool trả về lỗi và tầng điều phối sẽ đề nghị
+    ghi chú nội bộ. ops đã resolve theo ID; coordinator dựng ops, KHÔNG để LLM tự dựng.
     YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
 
     Args:
@@ -830,8 +831,9 @@ def update_quotation_lines(order_ref: str, ops: list | None = None) -> str:
 
 @mcp.tool()
 def update_rfq_lines(order_ref: str, ops: list | None = None) -> str:
-    """Sửa dòng hàng của ĐƠN MUA NHÁP (purchase.order, draft/sent). Chỉ dùng khi
-    đơn CHƯA xác nhận. ops đã resolve theo ID. YÊU CẦU XÁC NHẬN trước khi gọi.
+    """Sửa dòng hàng của ĐƠN MUA (purchase.order). Chỉ áp dụng được cho đơn nháp
+    (draft/sent); nếu đơn đã xác nhận, tool trả về lỗi và tầng điều phối sẽ đề nghị
+    ghi chú nội bộ. ops đã resolve theo ID. YÊU CẦU XÁC NHẬN trước khi gọi.
 
     Args:
         order_ref: Mã đơn mua, ví dụ "P00003".

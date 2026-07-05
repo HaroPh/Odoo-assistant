@@ -57,7 +57,7 @@ def get_sale_order_detail(ref, *, gw=None):
             return err(f"Có nhiều đơn tên '{ref}'.")
         o = orders[0]
         lines = gw.search_read("sale.order.line", [["order_id", "=", o["id"]]],
-                               ["product_id", "product_uom_qty", "price_unit", "price_subtotal"],
+                               ["id", "product_id", "product_uom_qty", "price_unit", "price_subtotal"],
                                order="id asc", limit=100)
     except Exception as e:                                  # noqa: BLE001
         return err(f"Lỗi tra cứu chi tiết đơn: {e}")

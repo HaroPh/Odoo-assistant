@@ -227,6 +227,44 @@ async def test_set_qty_zero_rejected(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_add_string_qty_rejected_no_crash(monkeypatch):
+    # A local LLM can emit qty as a JSON string (e.g. "5"). Must not raise
+    # TypeError from `"5" <= 0`; must return a friendly Vietnamese message.
+    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(eo.sales, "get_sale_order_detail", lambda ref: _detail())
+    node = eo.make_edit_order_node([_env_tool("update_quotation_lines", {})], eo.SALE_EDIT_CFG)
+    res = await _graph(node).ainvoke(
+        _state([{"action": "add", "product": "Desk Pad", "qty": "5"}]),
+        {"configurable": {"thread_id": "d14"}})
+    assert "__interrupt__" not in res
+    assert "phải là số" in res["messages"][-1].content
+
+
+@pytest.mark.asyncio
+async def test_set_qty_string_qty_rejected_no_crash(monkeypatch):
+    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(eo.sales, "get_sale_order_detail", lambda ref: _detail())
+    node = eo.make_edit_order_node([_env_tool("update_quotation_lines", {})], eo.SALE_EDIT_CFG)
+    res = await _graph(node).ainvoke(
+        _state([{"action": "set_qty", "product": "Large Cabinet", "qty": "9"}]),
+        {"configurable": {"thread_id": "d15"}})
+    assert "__interrupt__" not in res
+    assert "phải là số" in res["messages"][-1].content
+
+
+@pytest.mark.asyncio
+async def test_add_none_qty_rejected_no_crash(monkeypatch):
+    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(eo.sales, "get_sale_order_detail", lambda ref: _detail())
+    node = eo.make_edit_order_node([_env_tool("update_quotation_lines", {})], eo.SALE_EDIT_CFG)
+    res = await _graph(node).ainvoke(
+        _state([{"action": "add", "product": "Desk Pad", "qty": None}]),
+        {"configurable": {"thread_id": "d16"}})
+    assert "__interrupt__" not in res
+    assert "phải là số" in res["messages"][-1].content
+
+
+@pytest.mark.asyncio
 async def test_write_disabled_never_wipes_working_context(monkeypatch):
     # Direct node call (not through graph) so an omitted key is ABSENT in the
     # raw return — the node-level omit-vs-None contract (see PR #7).

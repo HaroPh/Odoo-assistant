@@ -45,3 +45,5 @@ def test_get_purchase_order_detail_includes_state():
     assert out["data"]["lines"][0]["id"] == 201
     order_call = next(c for c in gw._t.calls if c[0] == "purchase.order")
     assert "state" in order_call[3]["fields"]
+    line_call = next(c for c in gw._t.calls if c[0] == "purchase.order.line")
+    assert "id" in line_call[3]["fields"]

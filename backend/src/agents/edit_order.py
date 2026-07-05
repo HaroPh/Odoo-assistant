@@ -148,9 +148,9 @@ def make_edit_order_node(tools, cfg: EditCfg):
             act = c.get("action")
             if act == "add":
                 ref = c.get("product") or ""
-                qty = c.get("qty") or 0
-                if qty <= 0:
-                    return _msg(f"Số lượng thêm cho '{ref}' phải lớn hơn 0.")
+                qty = c.get("qty")
+                if not isinstance(qty, (int, float)) or isinstance(qty, bool) or qty <= 0:
+                    return _msg(f"Số lượng thêm cho '{ref}' phải là số lớn hơn 0.")
                 pkind, pval = resolve_entity_for_order(inventory.find_product(ref), ref)
                 if pkind == "error":
                     return _msg(pval)
@@ -191,9 +191,9 @@ def make_edit_order_node(tools, cfg: EditCfg):
                     ops.append({"op": "remove", "line_id": line["id"]})
                     removes.append(f"{_line_name(line)} (SL {line[cfg.qty_field]:g})")
                 else:
-                    qty = c.get("qty") or 0
-                    if qty <= 0:
-                        return _msg(f"Số lượng mới cho '{ref}' phải lớn hơn 0.")
+                    qty = c.get("qty")
+                    if not isinstance(qty, (int, float)) or isinstance(qty, bool) or qty <= 0:
+                        return _msg(f"Số lượng mới cho '{ref}' phải là số lớn hơn 0.")
                     ops.append({"op": "set_qty", "line_id": line["id"], "qty": qty})
                     sets.append(f"{_line_name(line)}: {line[cfg.qty_field]:g} → {qty:g}")
             else:

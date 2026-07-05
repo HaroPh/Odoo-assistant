@@ -66,3 +66,5 @@ def test_get_sale_order_detail_includes_state():
     assert out["data"]["lines"][0]["id"] == 101
     order_call = next(c for c in gw._t.calls if c[0] == "sale.order")
     assert "state" in order_call[3]["fields"]
+    line_call = next(c for c in gw._t.calls if c[0] == "sale.order.line")
+    assert "id" in line_call[3]["fields"]

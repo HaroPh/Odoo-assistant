@@ -98,6 +98,18 @@ def test_update_quotation_empty_ops(monkeypatch):
     assert writes == []
 
 
+def test_docstrings_do_not_self_censor_confirmed_orders():
+    # A prior commit (430a992) had to strip this exact wording from the planner
+    # prompt because it made the LLM refuse to even attempt edits on confirmed
+    # orders. The MCP docstrings must describe behavior (tool rejects confirmed
+    # orders; coordinator offers a flag-note), not instruct the caller to
+    # self-select-out — pin so it can't silently regress back in.
+    uq_doc = getattr(server.update_quotation_lines, "fn", server.update_quotation_lines).__doc__
+    ur_doc = getattr(server.update_rfq_lines, "fn", server.update_rfq_lines).__doc__
+    assert "CHƯA xác nhận" not in uq_doc
+    assert "CHƯA xác nhận" not in ur_doc
+
+
 def test_update_quotation_rejects_mixed_valid_invalid_batch(monkeypatch):
     # A valid op followed by an invalid op must reject the WHOLE batch —
     # no partial write of the earlier valid op(s).
