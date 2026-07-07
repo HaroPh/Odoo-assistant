@@ -127,3 +127,97 @@ async def test_planner_non_json_return_has_auto_chain_key(monkeypatch):
     monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
     out = await make_erp_write_planner_node(make_mock_llm("not json"))(_pstate("x"))
     assert "auto_chain" in out and out["auto_chain"] is None
+
+
+# ── continuation: queue consumption ──────────────────────────────────────────
+from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.types import Command
+from backend.src.agents.continuation import make_write_continuation_node
+
+
+def _cgraph():
+    g = StateGraph(ERPAgentState)
+    g.add_node("write_continuation", make_write_continuation_node())
+    g.set_entry_point("write_continuation")
+    g.add_edge("write_continuation", END)
+    return g.compile(checkpointer=MemorySaver())
+
+
+def _lw(tool="create_quotation", ok=True, ref="S00031", res_id=42):
+    return {"tool": tool, "ok": ok, "ref": ref, "model": "sale.order",
+            "res_id": res_id, "state": "draft",
+            "display": "Đã tạo báo giá S00031 (nháp) cho Azure."}
+
+
+def _cstate(lw, queue):
+    return {"messages": [], "intent": "erp_write", "confirmed": True,
+            "pending_action": {"tool": "x"}, "last_write": lw,
+            "auto_chain": queue}
+
+
+@pytest.mark.asyncio
+async def test_auto_proceed_no_interrupt():
+    res = await _cgraph().ainvoke(_cstate(_lw(), ["confirm_sale_order"]),
+                                  {"configurable": {"thread_id": "a1"}})
+    assert "__interrupt__" not in res
+    assert res["pending_action"] == {"tool": "confirm_sale_order",
+                                     "args": {"order_ref": "S00031"},
+                                     "summary": "Xác nhận báo giá"}
+    assert res["confirmed"] is True
+    assert res["last_write"] is None
+    assert res["auto_chain"] is None          # queue exhausted
+
+
+@pytest.mark.asyncio
+async def test_auto_proceed_keeps_rest_of_queue():
+    res = await _cgraph().ainvoke(
+        _cstate(_lw(), ["confirm_sale_order", "deliver_order"]),
+        {"configurable": {"thread_id": "a2"}})
+    assert "__interrupt__" not in res
+    assert res["auto_chain"] == ["deliver_order"]
+
+
+@pytest.mark.asyncio
+async def test_head_mismatch_falls_back_to_menu():
+    graph, cfg = _cgraph(), {"configurable": {"thread_id": "a3"}}
+    res = await graph.ainvoke(_cstate(_lw(), ["deliver_order"]), cfg)
+    itr = res["__interrupt__"][0].value       # menu, NOT auto-run of wrong step
+    assert itr["kind"] == "next_action"
+    res = await graph.ainvoke(Command(resume=False), cfg)
+    assert res["auto_chain"] is None
+
+
+@pytest.mark.asyncio
+async def test_failed_write_with_queue_warns_and_clears():
+    res = await _cgraph().ainvoke(_cstate(_lw(ok=False), ["confirm_sale_order"]),
+                                  {"configurable": {"thread_id": "a4"}})
+    assert "__interrupt__" not in res
+    assert "Chuỗi tự động dừng" in res["messages"][-1].content
+    assert res["auto_chain"] is None and res["last_write"] is None
+
+
+@pytest.mark.asyncio
+async def test_offchain_tool_with_queue_warns():
+    # vd nhánh flag của edit: write chạy OK nhưng tool không có NEXT_STEPS entry
+    lw = _lw(tool="flag_order_for_review", ok=True)
+    res = await _cgraph().ainvoke(_cstate(lw, ["confirm_sale_order"]),
+                                  {"configurable": {"thread_id": "a5"}})
+    assert "Chuỗi tự động dừng" in res["messages"][-1].content
+    assert res["auto_chain"] is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_with_queue_is_silent():
+    # lw falsy = user đã hủy ở draft confirm — không write nào chạy → im lặng
+    res = await _cgraph().ainvoke(_cstate(None, ["confirm_sale_order"]),
+                                  {"configurable": {"thread_id": "a6"}})
+    assert res["messages"] == []
+    assert res["auto_chain"] is None
+
+
+@pytest.mark.asyncio
+async def test_every_branch_writes_auto_chain_key_direct_call():
+    node = make_write_continuation_node()
+    out = await node({"messages": [], "last_write": None, "auto_chain": None})
+    assert "auto_chain" in out and out["auto_chain"] is None
