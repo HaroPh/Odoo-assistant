@@ -33,7 +33,7 @@ def make_write_continuation_node():
                 # chuỗi khai báo còn bước → báo tất định. Cancel (lw falsy):
                 # im lặng — "Đã hủy." của coordinator đã đủ.
                 upd["messages"] = [AIMessage(
-                    content="⚠️ Chuỗi tự động dừng: bước tiếp theo không chạy.")]
+                    content=f"{lw['display']}\n\n⚠️ Chuỗi tự động dừng: bước tiếp theo không chạy.")]
             return upd
 
         if queue:
@@ -44,7 +44,6 @@ def make_write_continuation_node():
                                            "summary": step.label},
                         "confirmed": True, "last_write": None,
                         "auto_chain": queue[1:] or None}
-            queue = []  # registry/path lệch khai báo → fail-safe về menu
 
         question = (f"{lw['display']}\n\nTiếp theo bạn có muốn:\n"
                     f"• {step.label}\n• Dừng")

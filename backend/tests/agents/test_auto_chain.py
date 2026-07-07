@@ -193,7 +193,9 @@ async def test_failed_write_with_queue_warns_and_clears():
     res = await _cgraph().ainvoke(_cstate(_lw(ok=False), ["confirm_sale_order"]),
                                   {"configurable": {"thread_id": "a4"}})
     assert "__interrupt__" not in res
-    assert "Chuỗi tự động dừng" in res["messages"][-1].content
+    content = res["messages"][-1].content
+    assert "Đã tạo báo giá S00031" in content   # lw['display'] must survive
+    assert "Chuỗi tự động dừng" in content
     assert res["auto_chain"] is None and res["last_write"] is None
 
 
@@ -203,7 +205,9 @@ async def test_offchain_tool_with_queue_warns():
     lw = _lw(tool="flag_order_for_review", ok=True)
     res = await _cgraph().ainvoke(_cstate(lw, ["confirm_sale_order"]),
                                   {"configurable": {"thread_id": "a5"}})
-    assert "Chuỗi tự động dừng" in res["messages"][-1].content
+    content = res["messages"][-1].content
+    assert lw["display"] in content            # real flag-note result survives
+    assert "Chuỗi tự động dừng" in content
     assert res["auto_chain"] is None
 
 
