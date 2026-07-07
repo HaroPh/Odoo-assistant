@@ -289,3 +289,91 @@ async def test_create_order_confirm_shows_chain_note(monkeypatch):
     q = res["__interrupt__"][0].value["question"]
     assert "Sau đó tự động: Xác nhận báo giá" in q
     assert q.index("Sau đó tự động") < q.index("Xác nhận? (có / không)")
+
+
+# ── integration: create → (auto) confirm qua graph write thật ────────────────
+from backend.src.agents.nodes import make_erp_write_executor_node
+from backend.src.agents.graph import (_route_after_write_planner,
+                                      _route_after_continuation)
+from backend.src.agents.write_registry import WRITE_COORDINATORS
+
+
+def _env_tool(name, ref, state_val, display, rec):
+    t = MagicMock()
+    t.name = name
+
+    async def ainvoke(args):
+        rec.append((name, args))
+        return json.dumps({"ok": True, "ref": ref, "model": "sale.order",
+                           "res_id": 99, "state": state_val, "display": display},
+                          ensure_ascii=False)
+
+    t.ainvoke = ainvoke
+    return t
+
+
+def _write_graph(llm, tools):
+    g = StateGraph(ERPAgentState)
+    g.add_node("erp_write_planner", make_erp_write_planner_node(llm))
+    g.add_node("erp_write_executor", make_erp_write_executor_node(tools))
+    for spec in WRITE_COORDINATORS.values():
+        g.add_node(spec.node, spec.build(llm, tools))
+    g.add_node("write_continuation", make_write_continuation_node())
+    g.set_entry_point("erp_write_planner")
+    targets = {END: END, "erp_write_executor": "erp_write_executor"}
+    targets.update({s.node: s.node for s in WRITE_COORDINATORS.values()})
+    g.add_conditional_edges("erp_write_planner", _route_after_write_planner, targets)
+    g.add_edge("erp_write_executor", "write_continuation")
+    for s in WRITE_COORDINATORS.values():
+        g.add_edge(s.node, "write_continuation")
+    g.add_conditional_edges("write_continuation", _route_after_continuation,
+                            {"erp_write_executor": "erp_write_executor", END: END})
+    return g.compile(checkpointer=MemorySaver())
+
+
+@pytest.mark.asyncio
+async def test_two_step_chain_one_confirm_end_to_end(monkeypatch):
+    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(co.sales, "find_customer",
+                        lambda *a, **k: _ok_env([{"id": 41, "name": "Azur", "score": 1}]))
+    monkeypatch.setattr(co.inventory, "find_product",
+                        lambda *a, **k: _ok_env([{"id": 552, "name": "Tủ", "score": 1}]))
+    monkeypatch.setattr(co.sales, "get_product_price",
+                        lambda *a, **k: {"status": "success",
+                                         "data": {"price": 100000.0}, "display": "x"})
+    rec = []
+    tools = [
+        _env_tool("create_quotation", "S00099", "draft",
+                  "Đã tạo báo giá S00099 (nháp) cho Azur (1 dòng).", rec),
+        _env_tool("confirm_sale_order", "S00099", "sale",
+                  "Đã xác nhận đơn S00099.", rec),
+    ]
+    llm = _mk_llm({"tool": "create_quotation",
+                   "args": {"partner_name": "Azur",
+                            "lines": [{"product": "Tủ", "qty": 2}]},
+                   "summary": "Tạo báo giá và xác nhận",
+                   "chain_until": "confirm_sale_order"})
+    graph = _write_graph(llm, tools)
+    cfg = {"configurable": {"thread_id": "e2e-1"}}
+
+    # Turn 1: draft confirm hiện chain_note — interrupt DUY NHẤT trước khi chạy
+    res = await graph.ainvoke(
+        {"messages": [HumanMessage(content="tạo báo giá cho Azur, 2 Tủ rồi xác nhận luôn")],
+         "intent": "erp_write", "pending_action": None, "confirmed": None}, cfg)
+    q = res["__interrupt__"][0].value["question"]
+    assert "Sau đó tự động: Xác nhận báo giá" in q
+    assert rec == []                                  # chưa write gì
+
+    # Resume "có": create chạy → continuation auto-proceed (KHÔNG interrupt)
+    # → executor confirm chạy → continuation: queue hết → menu bước kế (Giao hàng)
+    res = await graph.ainvoke(Command(resume=True), cfg)
+    assert [n for n, _ in rec] == ["create_quotation", "confirm_sale_order"]
+    assert rec[1][1] == {"order_ref": "S00099"}       # args từ registry lambda
+    itr = res["__interrupt__"][0].value
+    assert itr["kind"] == "next_action"
+    assert "Giao hàng" in itr["question"]             # menu chỉ hiện SAU chuỗi
+
+    # Dừng tại menu
+    res = await graph.ainvoke(Command(resume=False), cfg)
+    assert res["messages"][-1].content == "Đã dừng tại đây."
+    assert res["auto_chain"] is None
