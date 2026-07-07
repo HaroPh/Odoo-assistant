@@ -61,3 +61,27 @@ NEXT_STEPS = {
     "create_bill_from_po":       NextStep("Phát hành hóa đơn", "post_invoice",
                                           lambda lw: {"invoice_id": lw["res_id"]}),
 }
+
+
+def expand_chain(first_tool, chain_until):
+    """Các bước SAU first_tool tới chain_until (inclusive), walk theo NEXT_STEPS.
+
+    Trả [(tool, label), ...] theo thứ tự chạy; None nếu chain_until vắng, trùng
+    first_tool, không reachable, hoặc input rác. TOTAL function: không raise,
+    không I/O; cycle-guard bằng max-depth len(NEXT_STEPS)."""
+    try:
+        if (not chain_until or not isinstance(first_tool, str)
+                or not isinstance(chain_until, str) or chain_until == first_tool):
+            return None
+        steps, current = [], first_tool
+        for _ in range(len(NEXT_STEPS)):
+            nxt = NEXT_STEPS.get(current)
+            if nxt is None:
+                return None
+            steps.append((nxt.tool, nxt.label))
+            if nxt.tool == chain_until:
+                return steps
+            current = nxt.tool
+        return None
+    except Exception:  # noqa: BLE001 — total function
+        return None
