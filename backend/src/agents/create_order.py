@@ -38,15 +38,17 @@ def resolve_entity_for_order(envelope: dict, ref: str):
     return "ok", {"id": chosen["id"], "name": chosen["name"]}
 
 
-def render_draft(partner: dict, lines: list, total, head: str = "Báo giá cho") -> str:
-    """Confirm-draft text. total=None → qty-only (purchase); else priced (sale)."""
+def render_draft(partner: dict, lines: list, total, head: str = "Báo giá cho",
+                 note: str = "") -> str:
+    """Confirm-draft text. total=None → qty-only (purchase); else priced (sale).
+    note: dòng chuỗi tự động ("\n\nSau đó tự động: ...") chèn TRƯỚC câu hỏi."""
     if total is None:
         body = "\n".join(f"  - {l['name']} × {l['qty']:g}" for l in lines)
-        return f"{head} {partner['name']}:\n{body}\nXác nhận? (có / không)"
+        return f"{head} {partner['name']}:\n{body}{note}\nXác nhận? (có / không)"
     body = "\n".join(
         f"  - {l['name']} × {l['qty']:g} = {l['subtotal']:,.0f}" for l in lines)
     return (f"{head} {partner['name']}:\n{body}\n"
-            f"Tổng: {total:,.0f}\nXác nhận? (có / không)")
+            f"Tổng: {total:,.0f}{note}\nXác nhận? (có / không)")
 
 
 def _ttl_expiry() -> float:
@@ -154,9 +156,11 @@ def make_order_node(tools, cfg: OrderCfg):
 
         # 3) Confirm the draft
         total = sum(l["subtotal"] for l in lines) if cfg.price else None
+        note = (state.get("pending_action") or {}).get("chain_note") or ""
         confirmed = _interrupt({"kind": "confirm",
                                 "question": render_draft(partner, lines, total,
-                                                         head=cfg.draft_head),
+                                                         head=cfg.draft_head,
+                                                         note=note),
                                 "expires_at": _ttl_expiry()})
         if not confirmed:
             return _msg("Đã hủy.")

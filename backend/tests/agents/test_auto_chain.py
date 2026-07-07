@@ -221,3 +221,71 @@ async def test_every_branch_writes_auto_chain_key_direct_call():
     node = make_write_continuation_node()
     out = await node({"messages": [], "last_write": None, "auto_chain": None})
     assert "auto_chain" in out and out["auto_chain"] is None
+
+
+# ── chain_note in coordinator confirms ───────────────────────────────────────
+from unittest.mock import MagicMock
+import backend.src.agents.create_order as co
+import backend.src.agents.edit_order as eo
+from backend.src.agents.create_order import render_draft
+from backend.src.agents.edit_order import _render_diff
+
+NOTE = "\n\nSau đó tự động: Xác nhận báo giá"
+
+
+def test_render_draft_note_before_question():
+    out = render_draft({"name": "Azur"},
+                       [{"name": "Tủ", "qty": 2, "unit_price": 5.0, "subtotal": 10.0}],
+                       10.0, note=NOTE)
+    assert "Sau đó tự động: Xác nhận báo giá" in out
+    assert out.index("Sau đó tự động") < out.index("Xác nhận? (có / không)")
+
+
+def test_render_draft_purchase_variant_note():
+    out = render_draft({"name": "ACME"}, [{"name": "Tủ", "qty": 2}], None,
+                       head="Đơn mua từ", note=NOTE)
+    assert out.index("Sau đó tự động") < out.index("Xác nhận? (có / không)")
+
+
+def test_render_draft_no_note_unchanged():
+    out = render_draft({"name": "Azur"},
+                       [{"name": "Tủ", "qty": 2, "unit_price": 5.0, "subtotal": 10.0}],
+                       10.0)
+    assert "Sau đó tự động" not in out
+
+
+def test_render_diff_note_before_question():
+    out = _render_diff(eo.SALE_EDIT_CFG, "S00040", "Azur",
+                       ["Tủ × 2 = 10"], [], [], NOTE)
+    assert out.index("Sau đó tự động") < out.index("Xác nhận? (có / không)")
+
+
+def _ok_env(matches, needs=False):
+    return {"status": "success", "display": "x",
+            "data": {"matches": matches, "needs_disambiguation": needs}}
+
+
+@pytest.mark.asyncio
+async def test_create_order_confirm_shows_chain_note(monkeypatch):
+    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(co.sales, "find_customer",
+                        lambda *a, **k: _ok_env([{"id": 41, "name": "Azur", "score": 1}]))
+    monkeypatch.setattr(co.inventory, "find_product",
+                        lambda *a, **k: _ok_env([{"id": 552, "name": "Tủ", "score": 1}]))
+    monkeypatch.setattr(co.sales, "get_product_price",
+                        lambda *a, **k: {"status": "success",
+                                         "data": {"price": 100000.0}, "display": "x"})
+    g = StateGraph(ERPAgentState)
+    g.add_node("create_order", co.make_create_order_node(MagicMock(), []))
+    g.set_entry_point("create_order")
+    g.add_edge("create_order", END)
+    graph = g.compile(checkpointer=MemorySaver())
+    state = {"messages": [], "intent": "erp_write", "confirmed": None,
+             "pending_action": {"tool": "create_quotation",
+                                "args": {"partner_name": "Azur",
+                                         "lines": [{"product": "Tủ", "qty": 2}]},
+                                "chain_note": NOTE}}
+    res = await graph.ainvoke(state, {"configurable": {"thread_id": "n1"}})
+    q = res["__interrupt__"][0].value["question"]
+    assert "Sau đó tự động: Xác nhận báo giá" in q
+    assert q.index("Sau đó tự động") < q.index("Xác nhận? (có / không)")

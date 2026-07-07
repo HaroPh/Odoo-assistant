@@ -83,12 +83,12 @@ def _flag_note(changes) -> str:
     return "Đề nghị sửa: " + ("; ".join(parts) if parts else "(không rõ)") + "."
 
 
-def _render_diff(cfg, name, partner, adds, removes, sets) -> str:
+def _render_diff(cfg, name, partner, adds, removes, sets, note: str = "") -> str:
     body = [f"  + Thêm: {a}" for a in adds]
     body += [f"  - Xóa: {r}" for r in removes]
     body += [f"  ~ Đổi SL: {s}" for s in sets]
     return (f"Sửa {cfg.order_label} {name} ({partner}):\n"
-            + "\n".join(body) + "\nXác nhận? (có / không)")
+            + "\n".join(body) + note + "\nXác nhận? (có / không)")
 
 
 def make_edit_order_node(tools, cfg: EditCfg):
@@ -199,9 +199,10 @@ def make_edit_order_node(tools, cfg: EditCfg):
             else:
                 return _msg(f"Thao tác không hỗ trợ: '{act}'.")
 
+        note = (state.get("pending_action") or {}).get("chain_note") or ""
         confirmed = _interrupt({"kind": "confirm",
                                 "question": _render_diff(cfg, name, partner,
-                                                         adds, removes, sets),
+                                                         adds, removes, sets, note),
                                 "expires_at": _ttl_expiry()})
         if not confirmed:
             return _msg("Đã hủy.")
