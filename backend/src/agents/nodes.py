@@ -11,7 +11,7 @@ from langgraph.types import interrupt as _interrupt
 from .state import ERPAgentState
 from .prompts import (INTENT_ROUTER_PROMPT, SYSTEM_PROMPT, WRITE_PLANNER_PROMPT,
                       WRITE_CONFIRM_PREFIX, render_working_context)
-from .write_registry import COORDINATED_TOOLS
+from .write_registry import COORDINATED_TOOLS, expand_chain
 from ..rag.retrieve import retrieve
 from .synthesis import synthesize, SAFE_MSG
 from .tool_result import _tool_result_text, parse_write_result
@@ -108,7 +108,7 @@ def make_erp_write_planner_node(llm):
                     "Tính năng ghi (tạo/sửa đơn hàng, cập nhật tồn kho) "
                     "chưa được kích hoạt trong phiên bản này."
                 )
-            )], "pending_action": None}
+            )], "pending_action": None, "auto_chain": None}
 
         # Plan the action — invariant A: ONE effective system prompt; context
         # first so the JSON-format block stays last.
@@ -124,23 +124,32 @@ def make_erp_write_planner_node(llm):
         except json.JSONDecodeError:
             logger.warning("Write planner returned non-JSON: %s", response.content)
             return {"messages": [AIMessage(content="Không thể xác định thao tác cần thực hiện. Vui lòng mô tả rõ hơn.")],
-                    "pending_action": None}
+                    "pending_action": None, "auto_chain": None}
 
         # Invariant C tầng 2: mã tường minh trong lời user thắng context.
         last_human = next((m.content for m in reversed(state["messages"])
                            if m.type == "human"), "")
         plan = enforce_explicit_ref(plan, last_human)
 
+        # Chuỗi đa bước khai báo trước: validate tất định qua registry walk.
+        # LLM bịa chain_until → None → single-step như cũ (fail-safe).
+        chain = expand_chain(plan.get("tool"), plan.get("chain_until"))
+        auto_chain = [t for t, _ in chain] if chain else None
+        if chain:
+            plan = {**plan, "chain_note":
+                    "\n\nSau đó tự động: " + " → ".join(l for _, l in chain)}
+
         # Coordinated writes own their own resolution + confirm; don't interrupt here.
         if plan.get("tool") in COORDINATED_TOOLS:
-            return {"pending_action": plan}
+            return {"pending_action": plan, "auto_chain": auto_chain}
 
         summary = plan.get("summary") or plan.get("tool") or "thao tác"
         # Invariant C tầng 3: hiện tool+args TẤT ĐỊNH — user luôn thấy ref thật
         # trước khi "có", kể cả khi summary của LLM mơ hồ.
         args_line = ", ".join(f"{k}={v}" for k, v in (plan.get("args") or {}).items())
         question = WRITE_CONFIRM_PREFIX + (f"**{summary}**\n"
-                                           f"({plan.get('tool')}: {args_line})\n\n"
+                                           f"({plan.get('tool')}: {args_line})"
+                                           f"{plan.get('chain_note') or ''}\n\n"
                                            f"Xác nhận? (có / không)")
         ttl = int(os.environ.get("CONFIRMATION_TTL_SECONDS", "300"))
         confirmed = _interrupt({
@@ -148,7 +157,8 @@ def make_erp_write_planner_node(llm):
             "action": plan,
             "expires_at": time.time() + ttl,
         })
-        return {"pending_action": plan, "confirmed": confirmed}
+        return {"pending_action": plan, "confirmed": confirmed,
+                "auto_chain": auto_chain}
 
     return erp_write_planner
 

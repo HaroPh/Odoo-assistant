@@ -46,3 +46,7 @@ def test_edit_tools_registered_as_coordinated():
     assert NEXT_STEPS["update_rfq_lines"].tool == "confirm_purchase_order"
     # flag tool is terminal (no continuation)
     assert "flag_order_for_review" not in NEXT_STEPS
+
+
+def test_chain_until_documented_in_planner_prompt():
+    assert "chain_until" in WRITE_PLANNER_PROMPT

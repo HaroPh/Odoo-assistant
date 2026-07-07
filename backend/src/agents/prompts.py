@@ -48,11 +48,26 @@ Available write tools — use the tool name and arg keys EXACTLY as written:
 From the user's message, choose the matching tool and extract its args.
 Also write a short Vietnamese summary (1 sentence, start with a verb).
 
+If the user EXPLICITLY asks for follow-up steps in the SAME sentence ("rồi xác
+nhận luôn", "và giao hàng", "xuất hóa đơn luôn"...), also set "chain_until" to
+the LAST tool to run; intermediate steps are implied by the standard chains
+(sale: create_quotation → confirm_sale_order → deliver_order →
+create_invoice_from_order → post_invoice; purchase: create_rfq →
+confirm_purchase_order → receive_order → create_bill_from_po → post_invoice).
+Omit "chain_until" when the user only asks for one action.
+
+Examples:
+- "tạo báo giá cho Azure, 2 Tủ rồi xác nhận luôn" →
+  {"tool": "create_quotation", "args": {"partner_name": "Azure", "lines": [{"product": "Tủ", "qty": 2}]}, "summary": "Tạo báo giá và xác nhận đơn", "chain_until": "confirm_sale_order"}
+- "xác nhận đơn S00012" →
+  {"tool": "confirm_sale_order", "args": {"order_ref": "S00012"}, "summary": "Xác nhận đơn S00012"}
+
 Respond in JSON only:
 {
   "tool": "<exact tool name, or \\"other\\" if none match>",
   "args": {<exact arg keys>},
-  "summary": "<Vietnamese summary>"
+  "summary": "<Vietnamese summary>",
+  "chain_until": "<optional — last tool of the chain the user explicitly asked for>"
 }"""
 
 WRITE_CONFIRM_PREFIX = "Bạn có muốn thực hiện thao tác sau không?\n\n"

@@ -17,3 +17,9 @@ class ERPAgentState(TypedDict):
                                   # không node nào set None/clear key này; node chỉ THÊM
                                   # key khi có giá trị mới (omit-vs-None) → giá trị sống
                                   # xuyên lượt nhờ channel semantics của LangGraph.
+    auto_chain: list | None       # hàng đợi tool user đã duyệt TRƯỚC qua 1 confirm
+                                  # đầu chuỗi ("... rồi xác nhận luôn"). TRANSIENT
+                                  # như pending_action/last_write — NGƯỢC với
+                                  # working_context: erp_write_planner và
+                                  # write_continuation ghi key này trên MỌI return;
+                                  # không node nào khác đụng tới.
