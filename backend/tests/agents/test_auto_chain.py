@@ -48,5 +48,7 @@ def test_expand_unknown_or_unreachable_returns_none():
 
 def test_expand_total_on_garbage():
     for a, b in [(None, None), (123, "x"), ("create_quotation", 123),
-                 ({}, []), (None, "confirm_sale_order")]:
+                 ({}, []), (None, "confirm_sale_order"),
+                 ({}, "confirm_sale_order"), ([1, 2], "confirm_sale_order"),
+                 (123, "confirm_sale_order")]:
         assert expand_chain(a, b) is None
