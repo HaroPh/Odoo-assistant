@@ -9,7 +9,7 @@ Chạy SAU khi: docker compose up -d postgres ollama litellm
     python scripts/smoke_test_qwen3_tools.py
 
 Tiêu chí PASS: model trả về tool_call `search_late_orders` thay vì văn bản thường.
-Nếu FAIL → cân nhắc qwen2.5:7b fallback hoặc chỉnh prompt/template TRƯỚC khi viết Agent.
+Nếu FAIL → chỉnh prompt/template hoặc kiểm tra `ollama pull qwen3:8b` TRƯỚC khi viết Agent.
 """
 import json
 import os
@@ -85,7 +85,7 @@ def main() -> int:
 
     print("✗ FAIL — model trả văn bản, KHÔNG gọi tool:")
     print(f"  {(msg.get('content') or '')[:400]}")
-    print("  → Thử qwen2.5:7b (SMOKE_MODEL=qwen2.5:7b) hoặc chỉnh system prompt.")
+    print("  → Thử chỉnh system prompt hoặc kiểm tra `ollama pull qwen3:8b` đã chạy chưa.")
     return 1
 
 

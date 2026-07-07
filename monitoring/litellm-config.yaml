@@ -6,14 +6,6 @@ model_list:
     litellm_params:
       model: ollama_chat/qwen3:8b     # ollama_chat = hỗ trợ chat + tool-calling
       api_base: http://ollama:11434
-  - model_name: qwen3:4b              # fast (~3.5GB) — intent routing, câu ngắn
-    litellm_params:
-      model: ollama_chat/qwen3:4b
-      api_base: http://ollama:11434
-  - model_name: qwen2.5:7b            # fallback khi Qwen3 lỗi tool-call format
-    litellm_params:
-      model: ollama_chat/qwen2.5:7b
-      api_base: http://ollama:11434
 
 litellm_settings:
   drop_params: true                   # bỏ param model không hỗ trợ thay vì lỗi
