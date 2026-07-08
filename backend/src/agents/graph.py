@@ -14,6 +14,7 @@ from .nodes import (
 from .fusion import make_fusion_node
 from .write_registry import WRITE_COORDINATORS, COORDINATED_TOOLS
 from .continuation import make_write_continuation_node, _route_after_continuation
+from .models import llms_from_single
 
 
 def _route_by_intent(state: ERPAgentState) -> str:
@@ -32,17 +33,21 @@ def _route_after_write_planner(state: ERPAgentState) -> str:
 
 
 def build_graph(llm, tools, checkpointer) -> object:
+    # Nhận single-llm (test/back-compat: mọi role chung 1 model) HOẶC mapping
+    # role→llm (production, từ make_llms()). Normalize về mapping.
+    llms = llm if isinstance(llm, dict) else llms_from_single(llm)
+
     g = StateGraph(ERPAgentState)
 
-    g.add_node("intent_router", make_intent_router_node(llm))
-    g.add_node("erp_read", make_erp_read_node(llm, build_erp_query_tools()))
-    g.add_node("erp_write_planner", make_erp_write_planner_node(llm))
+    g.add_node("intent_router", make_intent_router_node(llms["router"]))
+    g.add_node("erp_read", make_erp_read_node(llms["read"], build_erp_query_tools()))
+    g.add_node("erp_write_planner", make_erp_write_planner_node(llms["planner"]))
     g.add_node("erp_write_executor", make_erp_write_executor_node(tools))
-    g.add_node("rag", make_rag_node(llm))
-    g.add_node("mixed", make_fusion_node(llm, build_erp_query_tools()))
-    g.add_node("respond_unknown", make_respond_unknown_node(llm))
+    g.add_node("rag", make_rag_node(llms["synthesis"]))
+    g.add_node("mixed", make_fusion_node(llms["fusion"], build_erp_query_tools()))
+    g.add_node("respond_unknown", make_respond_unknown_node(llms["chitchat"]))
     for spec in WRITE_COORDINATORS.values():
-        g.add_node(spec.node, spec.build(llm, tools))
+        g.add_node(spec.node, spec.build(llms["planner"], tools))
     g.add_node("write_continuation", make_write_continuation_node())
 
     g.set_entry_point("intent_router")

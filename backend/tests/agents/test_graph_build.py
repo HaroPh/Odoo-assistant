@@ -109,3 +109,10 @@ def test_continuation_loops_back_to_executor():
     edges = [(e.source, e.target) for e in graph.get_graph().edges]
     assert ("write_continuation", "erp_write_executor") in edges
     assert ("write_continuation", "__end__") in edges
+
+
+def test_build_graph_accepts_role_mapping():
+    from backend.src.agents.models import ROLES
+    llms = {r: MagicMock() for r in ROLES}
+    graph = build_graph(llms, tools=[], checkpointer=None)
+    assert graph is not None   # mapping form compiles y như single-llm form

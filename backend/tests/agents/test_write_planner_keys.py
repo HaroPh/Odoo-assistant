@@ -50,3 +50,14 @@ def test_edit_tools_registered_as_coordinated():
 
 def test_chain_until_documented_in_planner_prompt():
     assert "chain_until" in WRITE_PLANNER_PROMPT
+
+
+def test_cloud_bound_prompts_have_no_think_suffix():
+    # QĐ M2: router/evaluator/chitchat được phép chạy cloud (Gemini/Gemma) —
+    # prompt của chúng không được chứa chỉ thị đặc thù Qwen '/no_think'.
+    # (3 prompt local — SYSTEM_PROMPT, RAG_SYNTHESIS, FUSION — GIỮ /no_think.)
+    from backend.src.agents.prompts import INTENT_ROUTER_PROMPT
+    from backend.src.agents.confirmation import _LLM_PROMPT
+    assert "/no_think" not in INTENT_ROUTER_PROMPT
+    assert "/no_think" not in _LLM_PROMPT
+    # chit-chat (respond_unknown) không có system prompt riêng — không gì để pin

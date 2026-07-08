@@ -45,7 +45,7 @@ class _FakeGraph:
 def _agent_with(graph, llm=None):
     agent = ERPAgent()
     agent.graph = graph
-    agent._llm = llm or MagicMock()
+    agent._llms = {"evaluator": llm or MagicMock()}
     return agent
 
 

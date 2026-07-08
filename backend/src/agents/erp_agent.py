@@ -3,7 +3,6 @@ import os
 import uuid
 import time
 
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import RemoveMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -15,11 +14,9 @@ from psycopg_pool import AsyncConnectionPool
 from .graph import build_graph
 from .confirmation import CONFIRM, UNCLEAR, classify_confirmation
 from .disambiguation import parse_selection
+from .models import make_llms
 
-LITELLM_URL  = os.environ.get("LITELLM_URL", "http://localhost:4000/v1")
-LITELLM_KEY  = os.environ.get("LITELLM_MASTER_KEY", "")
 MCP_ODOO_URL = os.environ.get("MCP_ODOO_URL", "http://localhost:8001/sse")
-MODEL        = os.environ.get("AGENT_MODEL", "qwen3:8b")
 PG_CONN      = os.environ.get(
     "DATABASE_URL",
     "postgresql://admin:changeme@localhost:5433/ai_assistant",
@@ -115,14 +112,10 @@ class ERPAgent:
         self.graph = None
         self.tool_names: list[str] = []
         self._pool = None
-        self._llm = None
+        self._llms = None
 
     async def setup(self) -> None:
-        llm = ChatOpenAI(
-            model=MODEL, base_url=LITELLM_URL, api_key=LITELLM_KEY,
-            temperature=0, timeout=120,
-        )
-        self._llm = llm
+        self._llms = make_llms()
         client = MultiServerMCPClient(
             {"odoo": {"url": MCP_ODOO_URL, "transport": "sse"}}
         )
@@ -139,7 +132,7 @@ class ERPAgent:
         checkpointer = AsyncPostgresSaver(self._pool)
         await checkpointer.setup()  # creates checkpoint tables if not present
 
-        self.graph = build_graph(llm, tools, checkpointer)
+        self.graph = build_graph(self._llms, tools, checkpointer)
 
     async def chat(self, messages: list[dict], thread_id: str | None = None) -> str:
         """
@@ -167,7 +160,7 @@ class ERPAgent:
                 reply = messages[-1]["content"]
                 decision = await _decide_resume(
                     _pending_kind(snapshot), _pending_options(snapshot),
-                    _pending_question(snapshot), reply, self._llm)
+                    _pending_question(snapshot), reply, self._llms["evaluator"])
                 if isinstance(decision, str):
                     # Unclear reply: re-ask, leave the thread parked.
                     return decision
