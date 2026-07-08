@@ -111,8 +111,85 @@ def test_continuation_loops_back_to_executor():
     assert ("write_continuation", "__end__") in edges
 
 
-def test_build_graph_accepts_role_mapping():
+def test_build_graph_accepts_role_mapping(monkeypatch):
+    # Previously this test asserted only `graph is not None`, which is VACUOUS:
+    # StateGraph.compile() never invokes node bodies and MagicMock() swallows
+    # any attribute access silently, so that assertion still passes even if
+    # graph.py's per-role wiring is broken entirely (e.g. every node gets the
+    # raw llm/dict, or two roles' llms are swapped). Spy on each make_*_node
+    # factory — same idiom as test_mixed_node_built_with_erp_query_read_tools
+    # above — to capture the actual llm object each node factory is called
+    # with, then assert identity against that role's distinct sentinel.
+    import backend.src.agents.graph as graph_mod
     from backend.src.agents.models import ROLES
-    llms = {r: MagicMock() for r in ROLES}
+    from backend.src.agents.write_registry import WRITE_COORDINATORS, Spec
+
+    llms = {r: MagicMock(name=r) for r in ROLES}
+    captured = {}
+
+    def spy_llm_only(name, real):
+        def _spy(llm):
+            captured[name] = llm
+            return real(llm)
+        return _spy
+
+    def spy_llm_tools(name, real):
+        def _spy(llm, tools):
+            captured[name] = llm
+            return real(llm, tools)
+        return _spy
+
+    monkeypatch.setattr(graph_mod, "make_intent_router_node",
+                         spy_llm_only("intent_router", graph_mod.make_intent_router_node))
+    monkeypatch.setattr(graph_mod, "make_erp_read_node",
+                         spy_llm_tools("erp_read", graph_mod.make_erp_read_node))
+    monkeypatch.setattr(graph_mod, "make_erp_write_planner_node",
+                         spy_llm_only("erp_write_planner", graph_mod.make_erp_write_planner_node))
+    monkeypatch.setattr(graph_mod, "make_rag_node",
+                         spy_llm_only("rag", graph_mod.make_rag_node))
+    monkeypatch.setattr(graph_mod, "make_fusion_node",
+                         spy_llm_tools("mixed", graph_mod.make_fusion_node))
+    monkeypatch.setattr(graph_mod, "make_respond_unknown_node",
+                         spy_llm_only("respond_unknown", graph_mod.make_respond_unknown_node))
+
+    # Coordinators (create_order/create_rfq/.../inventory_adjust) receive
+    # llms["planner"] too, via spec.build(llms["planner"], tools) in
+    # graph.py — spy on each Spec's .build so a role-swap there is caught.
+    spied_coordinators = {}
+    for tool, spec in WRITE_COORDINATORS.items():
+        real_build = spec.build
+
+        def make_spy(node_name, real_build=real_build):
+            def _spy(llm, tools):
+                captured[node_name] = llm
+                return real_build(llm, tools)
+            return _spy
+
+        spied_coordinators[tool] = Spec(spec.node, make_spy(spec.node))
+    monkeypatch.setattr(graph_mod, "WRITE_COORDINATORS", spied_coordinators)
+
     graph = build_graph(llms, tools=[], checkpointer=None)
-    assert graph is not None   # mapping form compiles y như single-llm form
+    assert graph is not None
+
+    # Each node got its own role's llm...
+    assert captured["intent_router"] is llms["router"]
+    assert captured["erp_read"] is llms["read"]
+    assert captured["erp_write_planner"] is llms["planner"]
+    assert captured["rag"] is llms["synthesis"]
+    assert captured["mixed"] is llms["fusion"]
+    assert captured["respond_unknown"] is llms["chitchat"]
+    assert captured["create_order"] is llms["planner"]
+    assert captured["create_rfq"] is llms["planner"]
+    assert captured["inventory_adjust"] is llms["planner"]
+
+    # ...and critically NOT some other role's llm — this is what catches a
+    # role-swap bug (e.g. llms["read"] accidentally wired to router/planner).
+    assert captured["intent_router"] is not llms["read"]
+    assert captured["intent_router"] is not llms["planner"]
+    assert captured["erp_read"] is not llms["router"]
+    assert captured["erp_read"] is not llms["planner"]
+    assert captured["erp_write_planner"] is not llms["read"]
+    assert captured["erp_write_planner"] is not llms["router"]
+    assert captured["rag"] is not llms["fusion"]
+    assert captured["mixed"] is not llms["synthesis"]
+    assert captured["respond_unknown"] is not llms["router"]
