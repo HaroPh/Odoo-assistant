@@ -7,9 +7,28 @@ model_list:
       model: ollama_chat/qwen3:8b     # ollama_chat = hỗ trợ chat + tool-calling
       api_base: http://ollama:11434
 
+  # ── Cloud aliases (Phase A1, ADR-009 QĐ M2) — chỉ 3 role tầm thường được trỏ tới:
+  #    gemini-flash-lite ← router + evaluator · gemma-cloud ← chit-chat.
+  #    Chưa nhận traffic cho tới khi env MODEL_* được set (Task 6 / A3).
+  - model_name: gemini-flash-lite
+    litellm_params:
+      model: gemini/gemini-3.1-flash-lite
+      api_key: os.environ/GEMINI_API_KEY
+      timeout: 30                     # cloud 30s (spec §2.2#4) — local giữ 120
+      num_retries: 1
+  - model_name: gemma-cloud
+    litellm_params:
+      model: gemini/gemma-4-26b
+      api_key: os.environ/GEMINI_API_KEY
+      timeout: 30
+      num_retries: 1
+
 litellm_settings:
   drop_params: true                   # bỏ param model không hỗ trợ thay vì lỗi
   request_timeout: 120                 # giây — chặn treo vô hạn (TAD v1.1 §3.5)
+  fallbacks:
+    - gemini-flash-lite: ["qwen3:8b"]
+    - gemma-cloud: ["qwen3:8b"]
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
