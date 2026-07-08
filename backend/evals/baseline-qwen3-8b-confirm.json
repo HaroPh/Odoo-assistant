@@ -1,16 +1,16 @@
 {
   "set": "confirm",
   "n": 24,
-  "acc": 0.5416666666666666,
+  "acc": 0.5,
   "false_confirm": 0,
   "fails": [
     {
-      "text": "triển thôi",
+      "text": "duyệt nhé",
       "expected": "confirm",
       "got": "unclear"
     },
     {
-      "text": "duyệt nhé",
+      "text": "cứ thế mà làm",
       "expected": "confirm",
       "got": "unclear"
     },
@@ -51,6 +51,11 @@
     },
     {
       "text": "để mình suy nghĩ thêm",
+      "expected": "cancel",
+      "got": "unclear"
+    },
+    {
+      "text": "hôm khác làm",
       "expected": "cancel",
       "got": "unclear"
     },

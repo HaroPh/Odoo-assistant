@@ -58,7 +58,7 @@ INTENT_CASES = [
 CONFIRM_CASES = [
     # CONFIRM kỳ vọng
     ("chốt luôn đi", "confirm"),
-    ("triển thôi", "confirm"),
+    ("vậy triển đi nhé", "confirm"),
     ("gật", "confirm"),
     ("duyệt nhé", "confirm"),
     ("cứ thế mà làm", "confirm"),
@@ -79,8 +79,8 @@ CONFIRM_CASES = [
     ("đơn này của khách nào vậy?", "unclear"),
     ("2 cái hay 3 cái nhỉ?", "unclear"),
     ("bạn nghĩ sao?", "unclear"),
-    ("tại sao cần xác nhận?", "unclear"),
-    ("đổi thành 5 cái được không?", "unclear"),
+    ("quy trình này hoạt động ra sao?", "unclear"),
+    ("cho mình đổi thành 5 cái được chứ?", "unclear"),
     ("hmm để coi", "unclear"),
-    ("mà khoan, giá bao nhiêu ấy nhỉ?", "unclear"),
+    ("à mà giá bao nhiêu ấy nhỉ?", "unclear"),
 ]
