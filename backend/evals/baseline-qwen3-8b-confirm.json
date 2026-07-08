@@ -1,0 +1,63 @@
+{
+  "set": "confirm",
+  "n": 24,
+  "acc": 0.5416666666666666,
+  "false_confirm": 0,
+  "fails": [
+    {
+      "text": "triển thôi",
+      "expected": "confirm",
+      "got": "unclear"
+    },
+    {
+      "text": "duyệt nhé",
+      "expected": "confirm",
+      "got": "unclear"
+    },
+    {
+      "text": "chốt đơn giùm mình",
+      "expected": "confirm",
+      "got": "unclear"
+    },
+    {
+      "text": "êm, quất luôn",
+      "expected": "confirm",
+      "got": "unclear"
+    },
+    {
+      "text": "lên đơn đi bạn",
+      "expected": "confirm",
+      "got": "unclear"
+    },
+    {
+      "text": "để sau đi",
+      "expected": "cancel",
+      "got": "unclear"
+    },
+    {
+      "text": "từ từ đã",
+      "expected": "cancel",
+      "got": "unclear"
+    },
+    {
+      "text": "chưa vội đâu",
+      "expected": "cancel",
+      "got": "unclear"
+    },
+    {
+      "text": "đợi mình xem lại đã",
+      "expected": "cancel",
+      "got": "unclear"
+    },
+    {
+      "text": "để mình suy nghĩ thêm",
+      "expected": "cancel",
+      "got": "unclear"
+    },
+    {
+      "text": "sai rồi, làm lại cái khác",
+      "expected": "cancel",
+      "got": "unclear"
+    }
+  ]
+}

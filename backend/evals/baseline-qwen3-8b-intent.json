@@ -1,0 +1,27 @@
+{
+  "set": "intent",
+  "n": 40,
+  "acc": 0.9,
+  "fails": [
+    {
+      "text": "đơn của Azure Interior trễ SLA chưa?",
+      "expected": "mixed",
+      "got": "erp_read"
+    },
+    {
+      "text": "đơn S00040 của khách này đủ điều kiện chiết khấu theo bảng giá không?",
+      "expected": "mixed",
+      "got": "erp_read"
+    },
+    {
+      "text": "đơn nào đang vi phạm SLA giao hàng?",
+      "expected": "mixed",
+      "got": "erp_read"
+    },
+    {
+      "text": "giá trong đơn S00039 có khớp bảng giá hiện hành không?",
+      "expected": "mixed",
+      "got": "erp_read"
+    }
+  ]
+}
