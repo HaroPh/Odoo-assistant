@@ -92,14 +92,17 @@ def make_rag_node(llm):
 
 def make_respond_unknown_node(llm):
     async def respond_unknown(state: ERPAgentState) -> dict:
-        # M5 (ADR-009): role chit-chat được phép chạy cloud (QĐ M2) → không gửi
-        # full history — assistant-turn trước có thể mang dữ liệu ERP từ erp_read.
-        # Chỉ gửi tin nhắn user cuối, vô điều kiện (privacy-by-construction:
-        # không phụ thuộc role này đang trỏ local hay cloud).
+        # M5 (ADR-009): role chit-chat được phép chạy cloud (QĐ M2) → không
+        # gửi full history — assistant-turn trước có thể mang dữ liệu ERP từ
+        # erp_read. Chỉ gửi tin nhắn user cuối. Nếu KHÔNG có tin nhắn user
+        # nào trong state (route hiếm gặp), KHÔNG gọi LLM — trả câu mặc
+        # định, triệt tiêu hoàn toàn khả năng forward nội dung assistant-turn
+        # ra ngoài.
         last_human = next(
             (m for m in reversed(state["messages"]) if m.type == "human"), None)
-        msgs = [last_human] if last_human is not None else state["messages"][-1:]
-        response = await llm.ainvoke(msgs)
+        if last_human is None:
+            return {"messages": [AIMessage(content="Xin lỗi, bạn cần hỗ trợ gì?")]}
+        response = await llm.ainvoke([last_human])
         return {"messages": [response]}
 
     return respond_unknown

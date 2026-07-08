@@ -97,3 +97,54 @@ async def test_respond_unknown_sends_only_last_human_message_M5():
     payload = " ".join(m.content for m in captured["msgs"])
     assert "42" not in payload and "Tồn kho" not in payload
     assert out["messages"][0].content == "Không có gì!"
+
+
+@pytest.mark.asyncio
+async def test_respond_unknown_filters_by_type_not_position_M5():
+    # Regression case: an AIMessage sits AFTER the newest human message. A
+    # buggy "just take messages[-1:]" would forward it (or fail to filter by
+    # type at all); the correct behavior is to filter by m.type == "human"
+    # and use the newest one regardless of what trails it.
+    from backend.src.agents.nodes import make_respond_unknown_node
+    captured = {}
+
+    class FakeLLM:
+        async def ainvoke(self, msgs):
+            captured["msgs"] = msgs
+            return AIMessage(content="Không có gì!")
+
+    node = make_respond_unknown_node(FakeLLM())
+    out = await node({"messages": [
+        HumanMessage(content="turn1"),
+        AIMessage(content="ERP-A leak"),
+        HumanMessage(content="turn2 newest"),
+        AIMessage(content="stray trailing ERP-B leak"),
+    ]})
+    assert len(captured["msgs"]) == 1
+    assert captured["msgs"][0].content == "turn2 newest"
+    payload = " ".join(m.content for m in captured["msgs"])
+    assert "ERP-A leak" not in payload
+    assert "stray trailing ERP-B leak" not in payload
+    assert out["messages"][0].content == "Không có gì!"
+
+
+@pytest.mark.asyncio
+async def test_respond_unknown_zero_human_messages_never_calls_llm_M5():
+    # Critical fix: when state has NO human message at all (a rare but
+    # reachable route via make_intent_router_node), the node must NOT call
+    # the LLM at all — it must return a fixed canned reply, so an AIMessage
+    # carrying real ERP data can never be forwarded to the (cloud-eligible)
+    # chit-chat LLM.
+    from backend.src.agents.nodes import make_respond_unknown_node
+
+    class FakeLLM:
+        async def ainvoke(self, msgs):
+            raise AssertionError("LLM must not be invoked when there is no human message")
+
+    node = make_respond_unknown_node(FakeLLM())
+    out = await node({"messages": [
+        AIMessage(content="Tồn kho Desk Pad: 42 cái."),
+    ]})
+    assert out["messages"][0].content == "Xin lỗi, bạn cần hỗ trợ gì?"
+    payload = " ".join(m.content for m in out["messages"])
+    assert "42" not in payload and "Desk Pad" not in payload
