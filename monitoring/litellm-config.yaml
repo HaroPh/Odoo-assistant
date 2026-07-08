@@ -9,7 +9,8 @@ model_list:
 
   # ── Cloud aliases (Phase A1, ADR-009 QĐ M2) — chỉ 3 role tầm thường được trỏ tới:
   #    gemini-flash-lite ← router + evaluator · gemma-cloud ← chit-chat.
-  #    Chưa nhận traffic cho tới khi env MODEL_* được set (Task 6 / A3).
+  #    Model ID VERIFIED 2026-07-09 qua GET /v1beta/models (Task 6) — không phải
+  #    placeholder nữa. Đã nhận traffic (env MODEL_* set — Task 6 / A3).
   - model_name: gemini-flash-lite
     litellm_params:
       model: gemini/gemini-3.1-flash-lite
@@ -18,7 +19,7 @@ model_list:
       num_retries: 1
   - model_name: gemma-cloud
     litellm_params:
-      model: gemini/gemma-4-26b
+      model: gemini/gemma-4-26b-a4b-it
       api_key: os.environ/GEMINI_API_KEY
       timeout: 30
       num_retries: 1

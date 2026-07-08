@@ -81,6 +81,7 @@ services:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
       LITELLM_SALT_KEY: ${LITELLM_SALT_KEY}
       STORE_MODEL_IN_DB: "true"
+      GEMINI_API_KEY: ${GEMINI_API_KEY}     # Phase A cloud aliases (ADR-009 QĐ M2)
     volumes:
       - ./monitoring/litellm-config.yaml:/app/config.yaml:ro
     command: ["--config", "/app/config.yaml", "--detailed_debug"]
