@@ -68,3 +68,32 @@ def test_llms_from_single():
     m = MagicMock()
     d = llms_from_single(m)
     assert set(d) == set(ROLES) and all(v is m for v in d.values())
+
+
+import pytest
+from langchain_core.messages import HumanMessage, AIMessage
+
+
+@pytest.mark.asyncio
+async def test_respond_unknown_sends_only_last_human_message_M5():
+    # M5 (ADR-009): history có assistant-turn chứa dữ liệu ERP ("Tồn kho ... 42")
+    # → node chit-chat (được phép chạy cloud theo M2) không được thấy nó.
+    from backend.src.agents.nodes import make_respond_unknown_node
+    captured = {}
+
+    class FakeLLM:
+        async def ainvoke(self, msgs):
+            captured["msgs"] = msgs
+            return AIMessage(content="Không có gì!")
+
+    node = make_respond_unknown_node(FakeLLM())
+    out = await node({"messages": [
+        HumanMessage(content="tồn kho Desk Pad?"),
+        AIMessage(content="Tồn kho Desk Pad: 42 cái."),
+        HumanMessage(content="cảm ơn nhé"),
+    ]})
+    assert len(captured["msgs"]) == 1
+    assert captured["msgs"][0].content == "cảm ơn nhé"
+    payload = " ".join(m.content for m in captured["msgs"])
+    assert "42" not in payload and "Tồn kho" not in payload
+    assert out["messages"][0].content == "Không có gì!"
