@@ -42,8 +42,14 @@ def run(args) -> JobResult:
         print(f"PREFLIGHT FAIL: {err}")
         return JobResult("e2e-smoke", INFRA_ERROR, "ERROR", {"preflight": err})
     print(f"LƯU Ý: {ODOO_NOTE}.")
-    proc = subprocess.run([sys.executable, str(SCRIPT)], cwd=REPO_ROOT,
-                          capture_output=True, text=True, encoding="utf-8")
+    try:
+        proc = subprocess.run([sys.executable, str(SCRIPT)], cwd=REPO_ROOT,
+                              capture_output=True, text=True, encoding="utf-8",
+                              timeout=600)
+    except subprocess.TimeoutExpired as e:
+        detail = {"error": f"e2e-smoke timeout sau {e.timeout}s — script con treo",
+                  "note": ODOO_NOTE}
+        return JobResult("e2e-smoke", INFRA_ERROR, "ERROR", detail)
     detail = {"returncode": proc.returncode, "stdout": proc.stdout[-8000:],
               "stderr": proc.stderr[-4000:], "note": ODOO_NOTE}
     if proc.returncode == 0:

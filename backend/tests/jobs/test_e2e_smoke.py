@@ -45,6 +45,16 @@ def test_subprocess_nonzero_maps_fail(monkeypatch):
     assert "s1 FAIL" in result.detail["stdout"]
 
 
+def test_subprocess_timeout_maps_infra_error(monkeypatch):
+    monkeypatch.setattr(e2e_smoke, "_preflight", lambda: None)
+    def fake_run(*a, **kw):
+        raise e2e_smoke.subprocess.TimeoutExpired(cmd="fake", timeout=600)
+    monkeypatch.setattr(e2e_smoke.subprocess, "run", fake_run)
+    result = e2e_smoke.run(_args())
+    assert result.exit_code == INFRA_ERROR and result.verdict == "ERROR"
+    assert "timeout" in result.detail["error"].lower()
+
+
 def test_registered_not_schedulable():
     from backend.jobs.registry import JOBS
     assert "e2e-smoke" in JOBS and JOBS["e2e-smoke"].schedulable is False
