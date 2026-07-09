@@ -23,17 +23,23 @@ CLOUD_PACE_S = 5.0   # ~12 call/phút — an toàn dưới RPM=15 (R8)
 BASELINES = {
     "intent": EVALS_DIR / "baseline-qwen3-8b-intent.json",
     "confirm": EVALS_DIR / "baseline-qwen3-8b-confirm.json",
+    # "chitchat": KHÔNG có entry — gate tuyệt đối (violations==0), không
+    # baseline-relative (không có "câu trả lời đúng" cho chit-chat tự do).
 }
-ROLE_FOR_SET = {"intent": "router", "confirm": "evaluator"}
-EVAL_FN = {"intent": run_eval.eval_intent, "confirm": run_eval.eval_confirm}
+ROLE_FOR_SET = {"intent": "router", "confirm": "evaluator", "chitchat": "chitchat"}
+EVAL_FN = {"intent": run_eval.eval_intent, "confirm": run_eval.eval_confirm,
+           "chitchat": run_eval.eval_chitchat}
 
 
 def _auto_pace(model: str) -> float:
     return 0.0 if is_qwen(model) else CLOUD_PACE_S
 
 
-def _gate(set_name: str, result: dict, base: dict) -> bool:
-    # công thức GIỮ NGUYÊN VĂN run_eval / ADR-009 M3
+def _gate(set_name: str, result: dict, base: dict | None) -> bool:
+    # công thức GIỮ NGUYÊN VĂN run_eval / ADR-009 M3 cho intent/confirm.
+    # chitchat: gate tuyệt đối, không baseline-relative.
+    if set_name == "chitchat":
+        return result["violations"] == 0
     if set_name == "intent":
         return result["acc"] >= base["acc"]
     return (result["false_confirm"] == 0
@@ -49,20 +55,28 @@ def run(args) -> JobResult:
         try:
             # Đọc baseline TRƯỚC khi chạy eval thật (tốn call LLM, có pacing 5s/
             # call với cloud) — baseline thiếu/hỏng thì fail nhanh, không đốt
-            # call vô ích (whole-branch review finding, Important).
-            base = json.loads(BASELINES[set_name].read_text(encoding="utf-8"))
+            # call vô ích. chitchat KHÔNG có baseline (base ở lại None).
+            base = None
+            if set_name in BASELINES:
+                base = json.loads(BASELINES[set_name].read_text(encoding="utf-8"))
             result = asyncio.run(EVAL_FN[set_name](run_eval._llm(model), pace=pace))
         except Exception as e:  # noqa: BLE001 — hạ tầng (LiteLLM/key/model/baseline hỏng)
             detail[set_name] = {"model": model, "error": str(e)}
             return JobResult("eval-gate", INFRA_ERROR, "ERROR", detail)
         ok = _gate(set_name, result, base)
         any_fail |= not ok
-        detail[set_name] = {
-            "model": model, "pace": pace, "gate": "PASS" if ok else "FAIL",
-            "acc": result["acc"], "baseline_acc": base["acc"],
-            "false_confirm": result.get("false_confirm"), "fails": result["fails"]}
-        print(f"[{set_name}] model={model} pace={pace}s acc={result['acc']:.3f} "
-              f"baseline={base['acc']:.3f} → {'PASS' if ok else 'FAIL'}")
+        entry = {"model": model, "pace": pace, "gate": "PASS" if ok else "FAIL",
+                 "fails": result["fails"]}
+        if base is not None:
+            entry.update(acc=result["acc"], baseline_acc=base["acc"],
+                         false_confirm=result.get("false_confirm"))
+            print(f"[{set_name}] model={model} pace={pace}s acc={result['acc']:.3f} "
+                  f"baseline={base['acc']:.3f} → {'PASS' if ok else 'FAIL'}")
+        else:
+            entry["violations"] = result["violations"]
+            print(f"[{set_name}] model={model} pace={pace}s "
+                  f"violations={result['violations']} → {'PASS' if ok else 'FAIL'}")
+        detail[set_name] = entry
     verdict = "FAIL" if any_fail else "PASS"
     return JobResult("eval-gate", GATE_FAIL if any_fail else PASS, verdict, detail)
 
@@ -70,11 +84,13 @@ def run(args) -> JobResult:
 def add_args(p):
     p.add_argument("--model", default=None,
                    help="candidate model (mặc định: config đang sống qua model_for)")
-    p.add_argument("--set", choices=["both", "intent", "confirm"], default="both")
+    p.add_argument("--set", choices=["both", "intent", "confirm", "chitchat"],
+                   default="both")
     p.add_argument("--pace", type=float, default=None,
                    help="giây/call (mặc định auto: cloud 5.0, local 0)")
 
 
 register(Job("eval-gate", run,
-             "M3 gate: intent+confirm vs baseline (mặc định đo config sống)",
+             "M3 gate: intent+confirm vs baseline + chitchat anti-hallucination "
+             "(mặc định đo config sống)",
              schedulable=True, add_args=add_args))

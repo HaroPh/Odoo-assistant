@@ -110,3 +110,74 @@ def test_pace_override_wins(monkeypatch):
 def test_registered_and_schedulable():
     from backend.jobs.registry import JOBS
     assert "eval-gate" in JOBS and JOBS["eval-gate"].schedulable is True
+
+
+def _fake_chitchat_eval(violations=0, n=16):
+    async def fn(llm, pace=0.0):
+        fn.calls.append({"pace": pace})
+        fails = [{"text": "x", "response": "Đã tạo", "matched_markers": ["đã tạo"]}
+                 for _ in range(violations)]
+        return {"set": "chitchat", "n": n, "violations": violations, "fails": fails}
+    fn.calls = []
+    return fn
+
+
+def test_chitchat_zero_violations_passes(monkeypatch):
+    fchat = _fake_chitchat_eval(violations=0)
+    monkeypatch.setitem(eval_gate.EVAL_FN, "chitchat", fchat)
+    monkeypatch.setattr(run_eval, "_llm", lambda m: object())
+    result = eval_gate.run(_args(set_="chitchat"))
+    assert result.exit_code == PASS and result.verdict == "PASS"
+    assert result.detail["chitchat"]["gate"] == "PASS"
+    assert result.detail["chitchat"]["violations"] == 0
+
+
+def test_chitchat_nonzero_violations_fails(monkeypatch):
+    fchat = _fake_chitchat_eval(violations=2)
+    monkeypatch.setitem(eval_gate.EVAL_FN, "chitchat", fchat)
+    monkeypatch.setattr(run_eval, "_llm", lambda m: object())
+    result = eval_gate.run(_args(set_="chitchat"))
+    assert result.exit_code == GATE_FAIL and result.verdict == "FAIL"
+    assert result.detail["chitchat"]["violations"] == 2
+
+
+def test_chitchat_never_reads_a_baseline_file(monkeypatch, tmp_path):
+    fchat = _fake_chitchat_eval(violations=0)
+    monkeypatch.setitem(eval_gate.EVAL_FN, "chitchat", fchat)
+    monkeypatch.setattr(run_eval, "_llm", lambda m: object())
+    # BASELINES không có "chitchat" — nếu code lỡ tra cứu, KeyError sẽ lộ ra
+    # thành INFRA_ERROR thay vì PASS. Assert PASS tức là đường code không đọc.
+    assert "chitchat" not in eval_gate.BASELINES
+    result = eval_gate.run(_args(set_="chitchat"))
+    assert result.exit_code == PASS
+    assert "baseline_acc" not in result.detail["chitchat"]
+    assert "acc" not in result.detail["chitchat"]
+
+
+def test_both_still_excludes_chitchat(monkeypatch):
+    fi, fc = _patch(monkeypatch)
+    fchat = _fake_chitchat_eval(violations=0)
+    monkeypatch.setitem(eval_gate.EVAL_FN, "chitchat", fchat)
+    result = eval_gate.run(_args(set_="both"))
+    assert set(result.detail) == {"intent", "confirm"}
+    assert fchat.calls == []
+
+
+def test_chitchat_model_resolution_uses_chitchat_role(monkeypatch):
+    fchat = _fake_chitchat_eval(violations=0)
+    monkeypatch.setitem(eval_gate.EVAL_FN, "chitchat", fchat)
+    monkeypatch.setattr(run_eval, "_llm", lambda m: object())
+    monkeypatch.delenv("MODEL_CHITCHAT", raising=False)
+    monkeypatch.delenv("AGENT_MODEL", raising=False)
+    result = eval_gate.run(_args(set_="chitchat"))
+    assert result.detail["chitchat"]["model"] == "qwen3:8b"   # default local
+
+
+def test_chitchat_registered_as_valid_set_choice():
+    # add_args đăng ký choices cho --set — verify "chitchat" có mặt bằng cách
+    # dựng parser thật và parse.
+    import argparse as _argparse
+    p = _argparse.ArgumentParser()
+    eval_gate.add_args(p)
+    ns = p.parse_args(["--set", "chitchat"])
+    assert ns.set == "chitchat"
