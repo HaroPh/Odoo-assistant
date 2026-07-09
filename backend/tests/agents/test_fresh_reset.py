@@ -129,21 +129,40 @@ async def test_default_false_preserves_resume_semantics():
 
 # ── R7 hotfix (live-verify 2026-07-09): stateless answer path for Open WebUI's
 # own background task calls (title/tags/follow-up-gen) — must NEVER touch
-# thread/checkpoint state (no graph, no checkpointer at all).
+# thread/checkpoint state (no graph, no checkpointer at all), and must use a
+# role that is ALWAYS local by construction (task-prompt content may embed
+# real ERP data from earlier in the conversation — "chitchat" is cloud-
+# eligible and must never see it; "synthesis" is local-pinned).
 
-async def test_answer_stateless_uses_chitchat_llm_never_touches_graph():
+async def test_answer_stateless_uses_synthesis_llm_never_touches_graph():
     graph = _FakeGraph(_parked_snapshot(), {"messages": [AIMessage(content="unused")]})
     agent = _agent_with(graph)
-    agent._llms["chitchat"] = MagicMock()
-    agent._llms["chitchat"].ainvoke = AsyncMock(
+    agent._llms["synthesis"] = MagicMock()
+    agent._llms["synthesis"].ainvoke = AsyncMock(
         return_value=AIMessage(content='{"title": "Cabinet Pricing"}'))
 
     answer = await agent.answer_stateless("### Task:\nGenerate a title...")
 
     assert answer == '{"title": "Cabinet Pricing"}'
-    agent._llms["chitchat"].ainvoke.assert_awaited_once()
-    sent = agent._llms["chitchat"].ainvoke.await_args.args[0]
+    agent._llms["synthesis"].ainvoke.assert_awaited_once()
+    sent = agent._llms["synthesis"].ainvoke.await_args.args[0]
     assert len(sent) == 1 and sent[0].content == "### Task:\nGenerate a title..."
     graph.ainvoke.assert_not_awaited()
     graph.aget_state.assert_not_awaited()
     agent._checkpointer.adelete_thread.assert_not_awaited()
+
+
+async def test_answer_stateless_never_uses_chitchat():
+    # chitchat is CLOUD_ALLOWED; task-prompt content may embed real ERP data
+    # from earlier in the conversation, so it must never reach that role.
+    graph = _FakeGraph(_parked_snapshot(), {"messages": [AIMessage(content="unused")]})
+    agent = _agent_with(graph)
+    agent._llms["synthesis"] = MagicMock()
+    agent._llms["synthesis"].ainvoke = AsyncMock(return_value=AIMessage(content="ok"))
+    agent._llms["chitchat"] = MagicMock()
+    agent._llms["chitchat"].ainvoke = AsyncMock(
+        side_effect=AssertionError("chitchat must never be used for task-prompt content"))
+
+    await agent.answer_stateless("### Task:\nGenerate a title...")
+
+    agent._llms["chitchat"].ainvoke.assert_not_awaited()

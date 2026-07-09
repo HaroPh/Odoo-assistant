@@ -200,10 +200,19 @@ class ERPAgent:
         calls (title/tags/follow-up/query generation) share the same chat
         identity as real user turns, so routing them through chat() would
         risk wiping a real parked confirm (main.py's _is_owui_task_prompt
-        routes them here instead). Uses the chitchat-tier LLM — same
-        approved sensitivity class as the chitchat/unknown fallback.
+        routes them here instead).
+
+        Deliberately uses the "synthesis" role, NOT "chitchat": Open WebUI's
+        task prompts embed recent conversation history to generate relevant
+        titles/follow-ups, which may include real ERP data (prices, customer
+        names) produced by the local-pinned read/synthesis roles earlier in
+        the conversation. "chitchat" is cloud-eligible (CLOUD_ALLOWED) on the
+        premise that it only ever sees raw user text — that premise does not
+        hold for this content, so it must use a role that is ALWAYS local by
+        construction (model_for() fails closed for any role outside
+        CLOUD_ALLOWED), not one that merely happens to be local today.
         """
-        response = await self._llms["chitchat"].ainvoke([HumanMessage(content=content)])
+        response = await self._llms["synthesis"].ainvoke([HumanMessage(content=content)])
         return response.content
 
     async def _invoke_fresh(self, messages: list[dict], config: dict):

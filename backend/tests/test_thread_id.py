@@ -155,6 +155,31 @@ def test_empty_messages_not_task_prompt():
     assert _is_owui_task_prompt([]) is False
 
 
+def test_prefix_without_newline_not_task_prompt():
+    # Tightened match (I3, review 2026-07-09): requires the newline Open
+    # WebUI's real template always has right after "Task:", narrowing the
+    # false-positive surface for a real user message that merely starts
+    # with the words "### Task:" (e.g. pasted markdown) without the newline.
+    msgs = [{"role": "user", "content": "### Task: is this urgent?"}]
+    assert _is_owui_task_prompt(msgs) is False
+
+
+def test_none_content_does_not_crash():
+    # M4 (review 2026-07-09): a message dict with content=None explicitly
+    # (distinct from a missing key) must not crash .startswith on None.
+    msgs = [{"role": "user", "content": None}]
+    assert _is_owui_task_prompt(msgs) is False
+
+
+def test_real_message_matching_task_prefix_is_documented_tradeoff():
+    # I3 (review 2026-07-09): a real user's FIRST message that happens to
+    # match the exact prefix+newline is still routed to the stateless path
+    # (accepted residual risk, documented in spec §8) — it costs one ERP
+    # turn, but critically does NOT wipe any state either way.
+    msgs = [{"role": "user", "content": "### Task:\ncó phải deadline hôm nay không?"}]
+    assert _is_owui_task_prompt(msgs) is True
+
+
 class _RecordingAgentWithStateless(_RecordingAgent):
     def __init__(self):
         super().__init__()

@@ -66,7 +66,7 @@ def _explicit_session(body: dict) -> bool:
     return bool(body.get("session_id") or body.get("id"))
 
 
-_OWUI_TASK_PREFIX = "### Task:"
+_OWUI_TASK_PREFIX = "### Task:\n"
 
 
 def _is_owui_task_prompt(messages: list[dict]) -> bool:
@@ -78,12 +78,19 @@ def _is_owui_task_prompt(messages: list[dict]) -> bool:
     single user message with no session_id — indistinguishable from a real
     "fresh conversation" by headers alone, which would wipe a real parked
     confirm via the fresh-reset in ERPAgent.chat. Open WebUI's task prompts
-    use this stable internal template prefix (confirmed 2026-07-09 against a
-    live instance; see spec §8 for the residual risk if a future Open WebUI
-    version changes the template).
+    use this stable internal template prefix INCLUDING the newline (confirmed
+    2026-07-09 against a live instance, twice, both with "\n" immediately
+    after "Task:") — the newline narrows the (already unlikely) false-positive
+    where a real user's opener happens to start with "### Task:".
+
+    Residual risks (spec §8): an admin who customizes Open WebUI's task
+    prompt templates (Admin Settings) silently defeats this check and
+    reopens the original bug with no warning; a real user's first message
+    starting with this exact prefix+newline is silently answered without
+    the ERP agent (no state is wiped either way — see spec §8).
     """
     return (len(messages) == 1 and messages[0].get("role") == "user"
-            and messages[0].get("content", "").startswith(_OWUI_TASK_PREFIX))
+            and (messages[0].get("content") or "").startswith(_OWUI_TASK_PREFIX))
 
 
 def _derive_thread_id(body: dict, messages: list[dict], headers=None) -> str | None:
