@@ -100,8 +100,9 @@ async def chat_completions(req: Request):
     messages = _filter_messages(body.get("messages", []))
 
     agent: ERPAgent = _state["agent"]
-    # Stable thread per conversation so multi-turn confirmation resumes correctly
-    # (Open WebUI sends no session id — derive one from the first user message).
+    # Stable thread per conversation so multi-turn confirmation resumes correctly.
+    # Priority: Open WebUI identity headers (R7) > explicit client session_id/id
+    # > hash of the first user message (see _derive_thread_id docstring).
     thread_id = _derive_thread_id(body, messages, headers=req.headers)
     answer = await agent.chat(messages, thread_id=thread_id,
                               reset_if_fresh=not _explicit_session(body))
