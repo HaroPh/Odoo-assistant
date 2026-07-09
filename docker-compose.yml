@@ -111,6 +111,7 @@ services:
       ENABLE_OLLAMA_API: "false"        # chỉ hiện model erp-assistant từ backend
       WEBUI_AUTH: "false"               # dev: vào thẳng, không cần tạo account
       WEBUI_NAME: "ERP AI Assistant"
+      ENABLE_FORWARD_USER_INFO_HEADERS: "true"   # R7: gửi x-openwebui-chat-id/-user-id tới backend (spec 2026-07-09-r7-thread-scoping)
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
