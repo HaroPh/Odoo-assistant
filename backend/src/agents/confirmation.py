@@ -36,9 +36,13 @@ _CANCEL_WORDS = {
 _LLM_PROMPT = (
     "Người dùng được hỏi xác nhận thực hiện một thao tác ghi dữ liệu "
     "(có/không). Phân loại câu trả lời của họ thành đúng MỘT từ:\n"
-    "CONFIRM — đồng ý thực hiện\n"
+    "CONFIRM — đồng ý thực hiện ĐÚNG như đã đề xuất\n"
     "CANCEL — từ chối/hủy\n"
-    "UNCLEAR — không rõ ràng hoặc là câu hỏi\n"
+    "UNCLEAR — không rõ ràng, là câu hỏi, HOẶC yêu cầu THAY ĐỔI/sửa lại "
+    "thao tác đã đề xuất (dù có kèm '...được chứ?'/'...nhé' nghe như xin phép "
+    "— đây KHÔNG phải đồng ý với đề xuất ban đầu, cần hỏi lại trước khi làm)\n"
+    "Ví dụ: \"cho mình đổi thành 5 cái được chứ?\" → UNCLEAR (yêu cầu đổi "
+    "tham số, không phải xác nhận đề xuất cũ)\n"
     "Chỉ trả về MỘT từ: CONFIRM, CANCEL, hoặc UNCLEAR."
 )
 
