@@ -8,6 +8,18 @@ import sys
 import time
 from datetime import datetime
 
+# Whole-branch review finding (Critical): khi stdout/stderr bị redirect ra file
+# (đúng cách Task Scheduler chạy `>> log 2>&1`), Windows dùng ANSI codepage
+# (cp1252 trên máy này) thay vì UTF-8 — text tiếng Việt có dấu (kể cả "→")
+# crash UnicodeEncodeError, làm mất verdict thật và thoát exit 1 (vi phạm exit
+# contract 0/1/2). Console tương tác không dính lỗi này (Python dùng Windows
+# Console API, không qua codepage) — đó là lý do bug ẩn qua mọi lần test tay.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+
 # ── job modules đăng ký tại import (Task 3/4 thêm dòng ở đây) ────────────────
 from backend.jobs import eval_gate  # noqa: F401  (đăng ký side-effect)
 from backend.jobs import e2e_smoke  # noqa: F401  (đăng ký side-effect)

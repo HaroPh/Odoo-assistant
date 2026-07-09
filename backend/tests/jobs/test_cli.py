@@ -80,3 +80,27 @@ def test_job_specific_args_reach_fn():
     _fake_job("fake-args", fn=fn, add_args=add_args)
     assert main(["run", "fake-args", "--model", "x-model"]) == 0
     assert seen["model"] == "x-model"
+
+
+def test_cli_survives_redirected_cp1252_stdout():
+    """Regression (whole-branch review, Critical): khi stdout bị redirect ra
+    file (đúng cách Task Scheduler chạy), Windows dùng ANSI codepage thay vì
+    UTF-8 — output tiếng Việt (kể cả "→") từng crash UnicodeEncodeError, mất
+    verdict thật và thoát exit 1 (vi phạm exit contract 0/1/2). Chạy CLI THẬT
+    qua subprocess với PYTHONIOENCODING=cp1252 ép buộc, dùng job e2e-smoke có
+    sẵn với --scheduled (từ chối NGAY trước khi chạm network/subprocess con —
+    nhanh, không cần stack sống)."""
+    import subprocess
+
+    from backend.jobs.registry import INFRA_ERROR as _INFRA_ERROR
+    from backend.jobs.registry import REPO_ROOT
+
+    env = dict(os.environ, PYTHONIOENCODING="cp1252")
+    proc = subprocess.run(
+        [sys.executable, "-m", "backend.jobs", "run", "e2e-smoke", "--scheduled"],
+        cwd=REPO_ROOT, env=env, capture_output=True, text=True, encoding="cp1252",
+        timeout=30)
+    assert proc.returncode == _INFRA_ERROR
+    assert "UnicodeEncodeError" not in proc.stderr
+    assert "Traceback" not in proc.stderr
+    assert "REFUSED" in proc.stdout

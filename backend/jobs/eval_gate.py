@@ -44,14 +44,17 @@ def run(args) -> JobResult:
     sets = ["intent", "confirm"] if args.set == "both" else [args.set]
     detail, any_fail = {}, False
     for set_name in sets:
-        model = args.model or model_for(ROLE_FOR_SET[set_name])
+        model = args.model if args.model is not None else model_for(ROLE_FOR_SET[set_name])
         pace = args.pace if args.pace is not None else _auto_pace(model)
         try:
+            # Đọc baseline TRƯỚC khi chạy eval thật (tốn call LLM, có pacing 5s/
+            # call với cloud) — baseline thiếu/hỏng thì fail nhanh, không đốt
+            # call vô ích (whole-branch review finding, Important).
+            base = json.loads(BASELINES[set_name].read_text(encoding="utf-8"))
             result = asyncio.run(EVAL_FN[set_name](run_eval._llm(model), pace=pace))
-        except Exception as e:  # noqa: BLE001 — hạ tầng (LiteLLM/key/model hỏng)
+        except Exception as e:  # noqa: BLE001 — hạ tầng (LiteLLM/key/model/baseline hỏng)
             detail[set_name] = {"model": model, "error": str(e)}
             return JobResult("eval-gate", INFRA_ERROR, "ERROR", detail)
-        base = json.loads(BASELINES[set_name].read_text(encoding="utf-8"))
         ok = _gate(set_name, result, base)
         any_fail |= not ok
         detail[set_name] = {
