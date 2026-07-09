@@ -113,6 +113,7 @@ class ERPAgent:
         self.tool_names: list[str] = []
         self._pool = None
         self._llms = None
+        self._checkpointer = None
 
     async def setup(self) -> None:
         self._llms = make_llms()
@@ -131,14 +132,23 @@ class ERPAgent:
         await self._pool.open()
         checkpointer = AsyncPostgresSaver(self._pool)
         await checkpointer.setup()  # creates checkpoint tables if not present
+        self._checkpointer = checkpointer
 
         self.graph = build_graph(self._llms, tools, checkpointer)
 
-    async def chat(self, messages: list[dict], thread_id: str | None = None) -> str:
+    async def chat(self, messages: list[dict], thread_id: str | None = None,
+                   reset_if_fresh: bool = False) -> str:
         """
         messages: list of {"role", "content"} dicts (user/assistant).
         thread_id: stable ID per conversation — needed for interrupt/resume.
                    Defaults to a fresh UUID (safe when write gate is locked).
+        reset_if_fresh: opt-in (R7): when the caller DERIVED thread_id from a
+                   full-history client (Open WebUI headers / sha1 of the first
+                   message), a single-user-message turn means a brand-new
+                   conversation — wipe whatever an OLDER conversation parked
+                   under the same thread id and skip the resume branch. Leave
+                   False for clients that manage their own session_id and send
+                   single-message resume turns ("có").
         """
         if not messages:
             return "Vui lòng nhập câu hỏi."
@@ -146,27 +156,34 @@ class ERPAgent:
         tid = thread_id or uuid.uuid4().hex
         config = {"configurable": {"thread_id": tid}}
 
-        # If the thread is parked at a write-confirmation interrupt, this turn is
-        # the user's answer — classify it and resume instead of starting over.
-        snapshot = await self.graph.aget_state(config)
-        if _is_parked(snapshot):
-            expires_at = _pending_expiry(snapshot)
-            if expires_at is not None and time.time() > expires_at:
-                # Stale confirmation: discard it (resume=False is a no-op write,
-                # result ignored) and process this turn as a fresh request.
-                await self.graph.ainvoke(Command(resume=False), config=config)
-                result = await self._invoke_fresh(messages, config)
-            else:
-                reply = messages[-1]["content"]
-                decision = await _decide_resume(
-                    _pending_kind(snapshot), _pending_options(snapshot),
-                    _pending_question(snapshot), reply, self._llms["evaluator"])
-                if isinstance(decision, str):
-                    # Unclear reply: re-ask, leave the thread parked.
-                    return decision
-                result = await self.graph.ainvoke(decision, config=config)
-        else:
+        is_fresh = (reset_if_fresh and thread_id is not None
+                    and len(messages) == 1 and messages[0].get("role") == "user")
+        if is_fresh:
+            await self._checkpointer.adelete_thread(tid)
             result = await self._invoke_fresh(messages, config)
+        else:
+            # If the thread is parked at a write-confirmation interrupt, this
+            # turn is the user's answer — classify it and resume instead of
+            # starting over.
+            snapshot = await self.graph.aget_state(config)
+            if _is_parked(snapshot):
+                expires_at = _pending_expiry(snapshot)
+                if expires_at is not None and time.time() > expires_at:
+                    # Stale confirmation: discard it (resume=False is a no-op
+                    # write, result ignored) and process this turn as fresh.
+                    await self.graph.ainvoke(Command(resume=False), config=config)
+                    result = await self._invoke_fresh(messages, config)
+                else:
+                    reply = messages[-1]["content"]
+                    decision = await _decide_resume(
+                        _pending_kind(snapshot), _pending_options(snapshot),
+                        _pending_question(snapshot), reply, self._llms["evaluator"])
+                    if isinstance(decision, str):
+                        # Unclear reply: re-ask, leave the thread parked.
+                        return decision
+                    result = await self.graph.ainvoke(decision, config=config)
+            else:
+                result = await self._invoke_fresh(messages, config)
 
         # A write planner that called interrupt() surfaces as "__interrupt__" with
         # no final AI message — return its confirmation question to the user.

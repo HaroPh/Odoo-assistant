@@ -57,6 +57,15 @@ def _filter_messages(messages: list[dict]) -> list[dict]:
             if m.get("role") in ("user", "assistant") and m.get("content")]
 
 
+def _explicit_session(body: dict) -> bool:
+    """Did the client supply its own session id (body session_id/id)?
+
+    Such clients manage their own conversation state and may send
+    single-message resume turns — never enable fresh-reset for them.
+    """
+    return bool(body.get("session_id") or body.get("id"))
+
+
 def _derive_thread_id(body: dict, messages: list[dict], headers=None) -> str | None:
     """Stable per-conversation thread for interrupt/resume.
 
@@ -76,9 +85,8 @@ def _derive_thread_id(body: dict, messages: list[dict], headers=None) -> str | N
         if chat_id:
             user_id = headers.get("x-openwebui-user-id") or "anon"
             return f"owui:{user_id}:{chat_id}"
-    explicit = body.get("session_id") or body.get("id")
-    if explicit:
-        return str(explicit)
+    if _explicit_session(body):
+        return str(body.get("session_id") or body.get("id"))
     first_user = next((m["content"] for m in messages if m.get("role") == "user"), "")
     if not first_user:
         return None
@@ -95,7 +103,8 @@ async def chat_completions(req: Request):
     # Stable thread per conversation so multi-turn confirmation resumes correctly
     # (Open WebUI sends no session id — derive one from the first user message).
     thread_id = _derive_thread_id(body, messages, headers=req.headers)
-    answer = await agent.chat(messages, thread_id=thread_id)
+    answer = await agent.chat(messages, thread_id=thread_id,
+                              reset_if_fresh=not _explicit_session(body))
 
     cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
