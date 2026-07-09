@@ -31,9 +31,11 @@ def _llm(model: str) -> ChatOpenAI:
                       temperature=0, timeout=60)
 
 
-async def eval_intent(llm):
+async def eval_intent(llm, pace: float = 0.0):
     fails, n = [], len(INTENT_CASES)
-    for text, expected in INTENT_CASES:
+    for i, (text, expected) in enumerate(INTENT_CASES):
+        if pace and i:
+            await asyncio.sleep(pace)   # R8: giãn cách giữa 2 call (cloud RPM=15)
         resp = await llm.ainvoke([SystemMessage(content=INTENT_ROUTER_PROMPT),
                                   HumanMessage(content=text)])
         got = resp.content.strip().lower()
@@ -43,9 +45,11 @@ async def eval_intent(llm):
     return {"set": "intent", "n": n, "acc": (n - len(fails)) / n, "fails": fails}
 
 
-async def eval_confirm(llm):
+async def eval_confirm(llm, pace: float = 0.0):
     fails, false_confirm, n = [], 0, len(CONFIRM_CASES)
-    for text, expected in CONFIRM_CASES:
+    for i, (text, expected) in enumerate(CONFIRM_CASES):
+        if pace and i:
+            await asyncio.sleep(pace)   # R8: giãn cách giữa 2 call (cloud RPM=15)
         resp = await llm.ainvoke([SystemMessage(content=_LLM_PROMPT),
                                   HumanMessage(content=text)])
         v = resp.content.strip().upper()
@@ -64,10 +68,13 @@ async def main():
     ap.add_argument("--model", required=True)
     ap.add_argument("--save-baseline", action="store_true")
     ap.add_argument("--baseline")
+    ap.add_argument("--pace", type=float, default=0.0,
+                    help="giây giãn cách giữa 2 call (R8: cloud RPM=15 → dùng 5.0)")
     args = ap.parse_args()
 
     try:
-        result = await (eval_intent if args.set == "intent" else eval_confirm)(_llm(args.model))
+        result = await (eval_intent if args.set == "intent" else eval_confirm)(
+            _llm(args.model), pace=args.pace)
     except Exception as e:   # noqa: BLE001 — hạ tầng (LiteLLM/key/model) hỏng
         print(f"INFRA ERROR: {e}"); sys.exit(2)
 
