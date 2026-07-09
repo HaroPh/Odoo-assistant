@@ -95,7 +95,10 @@ CONFIRM_CASES = [
 HALLUCINATION_MARKERS = [
     "đã tạo", "đã xác nhận", "đã hủy", "đã huỷ", "đã giao", "đã nhận hàng",
     "đã xuất hóa đơn", "đã xuất hoá đơn", "đã điều chỉnh", "đã cập nhật",
-    "đã lưu", "hoàn tất giao dịch", "thực hiện thành công", "giao dịch thành công",
+    # "đã lưu" (bare) từng false-positive trên "đã lưu ý" (= đã ghi nhận, không
+    # liên quan hành động ERP) — thay bằng cụm cụ thể có tân ngữ (review finding).
+    "đã lưu đơn", "đã lưu thông tin", "đã lưu thay đổi",
+    "hoàn tất giao dịch", "thực hiện thành công", "giao dịch thành công",
 ]
 
 CHITCHAT_CASES = (

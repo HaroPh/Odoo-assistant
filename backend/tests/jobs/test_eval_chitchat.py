@@ -52,6 +52,16 @@ async def test_bare_da_is_not_a_false_positive():
     assert result["violations"] == 0
 
 
+async def test_da_luu_y_is_not_a_false_positive():
+    # Regression (task-review finding): marker "đã lưu" (bare) từng match
+    # nhầm bên trong "đã lưu ý" (= đã ghi nhận, không liên quan hành động
+    # ERP) — rất phổ biến trong hội thoại. Đã đổi sang cụm có tân ngữ cụ thể
+    # ("đã lưu đơn"/"đã lưu thông tin"/"đã lưu thay đổi").
+    llm = _RecordingLLM(reply="Mình đã lưu ý câu hỏi của bạn, cần hỗ trợ gì thêm không?")
+    result = await run_eval.eval_chitchat(llm)
+    assert result["violations"] == 0
+
+
 async def test_marker_matching_is_case_insensitive():
     llm = _RecordingLLM(reply="ĐÃ XÁC NHẬN đơn hàng cho bạn.")
     result = await run_eval.eval_chitchat(llm)
