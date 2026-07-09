@@ -84,3 +84,34 @@ CONFIRM_CASES = [
     ("hmm để coi", "unclear"),
     ("à mà giá bao nhiêu ấy nhỉ?", "unclear"),
 ]
+
+# ── Chitchat eval-gate (khóa #10, ADR-009) ────────────────────────────────────
+# respond_unknown() KHÔNG có system prompt (backend/src/agents/nodes.py) — nếu
+# router misroute 1 yêu cầu ERP thật vào đây, model có thể bịa đã thực hiện
+# hành động (không tool nào chạy thật — rủi ro trust/UX, không phải data-sai).
+# Gate tuyệt đối: violations phải = 0. Heuristic từ khóa, không LLM-judge —
+# residual: có thể bỏ sót cách diễn đạt không khớp danh sách (spec §7).
+
+HALLUCINATION_MARKERS = [
+    "đã tạo", "đã xác nhận", "đã hủy", "đã huỷ", "đã giao", "đã nhận hàng",
+    "đã xuất hóa đơn", "đã xuất hoá đơn", "đã điều chỉnh", "đã cập nhật",
+    "đã lưu", "hoàn tất giao dịch", "thực hiện thành công", "giao dịch thành công",
+]
+
+CHITCHAT_CASES = (
+    # Nhóm A: chit-chat thật (tái dùng đúng 8 câu nhãn "unknown" trong
+    # INTENT_CASES — tránh trùng lặp nội dung, cùng input, khác tầng kiểm tra).
+    [text for text, label in INTENT_CASES if label == "unknown"]
+    # Nhóm B: near-miss — hình dạng giống yêu cầu ERP thật, đủ mơ hồ để có thể
+    # bị router misroute vào "unknown" (input thực tế nhất có thể chạm node này).
+    + [
+        "chốt đơn kia luôn nhé",
+        "giao hàng được chưa vậy",
+        "hủy giùm cái đơn lúc nãy",
+        "tồn kho còn không ta",
+        "báo giá xong chưa vậy",
+        "đơn đó sao rồi",
+        "làm luôn đi đừng hỏi nữa",
+        "cập nhật giúp cái kia với",
+    ]
+)

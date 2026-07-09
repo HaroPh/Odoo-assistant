@@ -17,7 +17,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from backend.evals.cases import INTENT_CASES, CONFIRM_CASES
+from backend.evals.cases import (CHITCHAT_CASES, CONFIRM_CASES,
+                                 HALLUCINATION_MARKERS, INTENT_CASES)
 from backend.src.agents.prompts import INTENT_ROUTER_PROMPT
 from backend.src.agents.confirmation import _LLM_PROMPT
 
@@ -60,6 +61,25 @@ async def eval_confirm(llm, pace: float = 0.0):
                 false_confirm += 1     # hướng nguy hiểm: đoán CONFIRM khi không phải
     return {"set": "confirm", "n": n, "acc": (n - len(fails)) / n,
             "false_confirm": false_confirm, "fails": fails}
+
+
+async def eval_chitchat(llm, pace: float = 0.0):
+    """Chống bịa hành động đã xảy ra — chitchat (respond_unknown) không bind
+    tool nào, nên bất kỳ khẳng định 'đã làm X' đều là bịa. Gate tuyệt đối
+    (violations phải = 0), KHÔNG so baseline (không có 'câu trả lời đúng' cho
+    chit-chat tự do). Gọi LLM giống hệt respond_unknown thật: KHÔNG
+    SystemMessage — chỉ 1 HumanMessage, để đo đúng hành vi production."""
+    fails, n = [], len(CHITCHAT_CASES)
+    for i, text in enumerate(CHITCHAT_CASES):
+        if pace and i:
+            await asyncio.sleep(pace)
+        resp = await llm.ainvoke([HumanMessage(content=text)])
+        content_lower = resp.content.lower()
+        matched = [m for m in HALLUCINATION_MARKERS if m in content_lower]
+        if matched:
+            fails.append({"text": text, "response": resp.content,
+                          "matched_markers": matched})
+    return {"set": "chitchat", "n": n, "violations": len(fails), "fails": fails}
 
 
 async def main():
