@@ -57,14 +57,25 @@ def _filter_messages(messages: list[dict]) -> list[dict]:
             if m.get("role") in ("user", "assistant") and m.get("content")]
 
 
-def _derive_thread_id(body: dict, messages: list[dict]) -> str | None:
+def _derive_thread_id(body: dict, messages: list[dict], headers=None) -> str | None:
     """Stable per-conversation thread for interrupt/resume.
 
-    Prefer an explicit id from the client. Open WebUI sends neither `session_id`
-    nor `id`, so fall back to a hash of the FIRST user message — stable across the
-    turns of one conversation (the client resends full history each turn), so a
-    later "có"/"không" resumes the same parked confirm instead of a fresh UUID.
+    Priority (R7 fix, spec 2026-07-09-r7-thread-scoping):
+      1. Open WebUI identity headers — real per-chat id, sent when the
+         open-webui container has ENABLE_FORWARD_USER_INFO_HEADERS=true.
+         Only the two id headers are read; name/email/role are PII and must
+         never be read or logged.
+      2. Explicit id from the client body (scripts/curl).
+      3. Hash of the FIRST user message — stable across the turns of one
+         conversation, but collides across conversations with identical
+         openers; the fresh-conversation reset in ERPAgent.chat mitigates.
+      4. None (no user message).
     """
+    if headers is not None:
+        chat_id = headers.get("x-openwebui-chat-id")
+        if chat_id:
+            user_id = headers.get("x-openwebui-user-id") or "anon"
+            return f"owui:{user_id}:{chat_id}"
     explicit = body.get("session_id") or body.get("id")
     if explicit:
         return str(explicit)
@@ -83,7 +94,7 @@ async def chat_completions(req: Request):
     agent: ERPAgent = _state["agent"]
     # Stable thread per conversation so multi-turn confirmation resumes correctly
     # (Open WebUI sends no session id — derive one from the first user message).
-    thread_id = _derive_thread_id(body, messages)
+    thread_id = _derive_thread_id(body, messages, headers=req.headers)
     answer = await agent.chat(messages, thread_id=thread_id)
 
     cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"

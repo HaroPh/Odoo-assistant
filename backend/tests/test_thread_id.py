@@ -30,3 +30,34 @@ def test_different_conversations_differ():
 
 def test_no_user_message_returns_none():
     assert _derive_thread_id({}, []) is None
+
+
+# ── R7 Lớp A: Open WebUI identity headers ─────────────────────────────────────
+
+def test_header_chat_id_with_user_id():
+    headers = {"x-openwebui-chat-id": "chat-123", "x-openwebui-user-id": "u-9"}
+    assert _derive_thread_id({}, [], headers=headers) == "owui:u-9:chat-123"
+
+
+def test_header_chat_id_without_user_id():
+    headers = {"x-openwebui-chat-id": "chat-123"}
+    assert _derive_thread_id({}, [], headers=headers) == "owui:anon:chat-123"
+
+
+def test_header_beats_explicit_body_session():
+    headers = {"x-openwebui-chat-id": "chat-123", "x-openwebui-user-id": "u-9"}
+    assert _derive_thread_id({"session_id": "abc"}, [],
+                             headers=headers) == "owui:u-9:chat-123"
+
+
+def test_user_id_alone_does_not_derive_thread():
+    # user-id không có chat-id thì không định danh được HỘI THOẠI → rơi xuống
+    # chuỗi ưu tiên cũ.
+    headers = {"x-openwebui-user-id": "u-9"}
+    assert _derive_thread_id({"session_id": "abc"}, [], headers=headers) == "abc"
+
+
+def test_absent_headers_keep_old_behavior():
+    m = [{"role": "user", "content": "xin chào"}]
+    assert _derive_thread_id({}, m, headers=None) == _derive_thread_id({}, m)
+    assert _derive_thread_id({}, m, headers={}) == _derive_thread_id({}, m)
