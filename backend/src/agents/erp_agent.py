@@ -3,7 +3,7 @@ import os
 import uuid
 import time
 
-from langchain_core.messages import RemoveMessage
+from langchain_core.messages import HumanMessage, RemoveMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -192,6 +192,19 @@ class ERPAgent:
             return question
 
         return result["messages"][-1].content.strip()
+
+    async def answer_stateless(self, content: str) -> str:
+        """Answer a single prompt with no thread/checkpoint state at all.
+
+        R7 hotfix (live-verify 2026-07-09): Open WebUI's own background task
+        calls (title/tags/follow-up/query generation) share the same chat
+        identity as real user turns, so routing them through chat() would
+        risk wiping a real parked confirm (main.py's _is_owui_task_prompt
+        routes them here instead). Uses the chitchat-tier LLM — same
+        approved sensitivity class as the chitchat/unknown fallback.
+        """
+        response = await self._llms["chitchat"].ainvoke([HumanMessage(content=content)])
+        return response.content
 
     async def _invoke_fresh(self, messages: list[dict], config: dict):
         """Run a non-resume turn, overwriting the persisted message channel.

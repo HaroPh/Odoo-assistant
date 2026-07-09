@@ -120,3 +120,80 @@ def test_endpoint_owui_headers_win_and_enable_reset():
                                "X-OpenWebUI-User-Id": "u1"})
     assert call["thread_id"] == "owui:u1:c1"
     assert call["reset_if_fresh"] is True
+
+
+# ── R7 hotfix (live-verify 2026-07-09): Open WebUI's own background task calls
+# (title/tags/follow-up/query generation) share the SAME x-openwebui-chat-id
+# header as real user turns and are always a single user message with no
+# session_id — indistinguishable from a real "fresh conversation" by headers
+# alone. Detect them by Open WebUI's stable internal prompt prefix so they
+# never touch thread/checkpoint state (never wipe a real parked confirm).
+from src.main import _is_owui_task_prompt
+
+
+def test_task_prompt_detected_single_message():
+    msgs = [{"role": "user", "content": "### Task:\nSuggest 3-5 relevant follow-up "
+                                        "questions or prompts..."}]
+    assert _is_owui_task_prompt(msgs) is True
+
+
+def test_normal_message_not_task_prompt():
+    assert _is_owui_task_prompt([{"role": "user", "content": "xin chào"}]) is False
+
+
+def test_task_prefix_in_multi_turn_history_not_task_prompt():
+    # A real user could paste "### Task:" text mid-conversation; only a
+    # SOLE message with this prefix (Open WebUI's own single-shot call
+    # shape) is treated as a task prompt.
+    msgs = [{"role": "user", "content": "### Task:\nfollow-up..."},
+            {"role": "assistant", "content": "ok"},
+            {"role": "user", "content": "tiếp tục"}]
+    assert _is_owui_task_prompt(msgs) is False
+
+
+def test_empty_messages_not_task_prompt():
+    assert _is_owui_task_prompt([]) is False
+
+
+class _RecordingAgentWithStateless(_RecordingAgent):
+    def __init__(self):
+        super().__init__()
+        self.stateless_calls = []
+
+    async def answer_stateless(self, content):
+        self.stateless_calls.append(content)
+        return "stateless-ok"
+
+
+def test_endpoint_task_prompt_skips_thread_and_chat():
+    agent = _RecordingAgentWithStateless()
+    main_mod._state["agent"] = agent
+    try:
+        client = TestClient(main_mod.app)
+        resp = client.post("/v1/chat/completions", json={
+            "messages": [{"role": "user",
+                         "content": "### Task:\nSuggest 3-5 relevant follow-up "
+                                    "questions..."}],
+            "stream": False},
+            headers={"X-OpenWebUI-Chat-Id": "c1", "X-OpenWebUI-User-Id": "u1"})
+        assert resp.status_code == 200
+        assert agent.calls == []  # agent.chat NEVER called — no thread touched
+        assert len(agent.stateless_calls) == 1
+        assert agent.stateless_calls[0].startswith("### Task:")
+    finally:
+        main_mod._state.pop("agent", None)
+
+
+def test_endpoint_normal_message_still_uses_chat_not_stateless():
+    agent = _RecordingAgentWithStateless()
+    main_mod._state["agent"] = agent
+    try:
+        client = TestClient(main_mod.app)
+        resp = client.post("/v1/chat/completions", json={
+            "messages": [{"role": "user", "content": "xin chào"}], "stream": False},
+            headers={"X-OpenWebUI-Chat-Id": "c1", "X-OpenWebUI-User-Id": "u1"})
+        assert resp.status_code == 200
+        assert agent.stateless_calls == []
+        assert len(agent.calls) == 1
+    finally:
+        main_mod._state.pop("agent", None)

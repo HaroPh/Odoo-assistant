@@ -66,6 +66,26 @@ def _explicit_session(body: dict) -> bool:
     return bool(body.get("session_id") or body.get("id"))
 
 
+_OWUI_TASK_PREFIX = "### Task:"
+
+
+def _is_owui_task_prompt(messages: list[dict]) -> bool:
+    """Is this Open WebUI's own background auto-generation call (title/tags/
+    follow-up/query generation), not a real user turn?
+
+    R7 hotfix (live-verify 2026-07-09, spec §8): these calls carry the SAME
+    x-openwebui-chat-id/-user-id headers as real user turns and are always a
+    single user message with no session_id — indistinguishable from a real
+    "fresh conversation" by headers alone, which would wipe a real parked
+    confirm via the fresh-reset in ERPAgent.chat. Open WebUI's task prompts
+    use this stable internal template prefix (confirmed 2026-07-09 against a
+    live instance; see spec §8 for the residual risk if a future Open WebUI
+    version changes the template).
+    """
+    return (len(messages) == 1 and messages[0].get("role") == "user"
+            and messages[0].get("content", "").startswith(_OWUI_TASK_PREFIX))
+
+
 def _derive_thread_id(body: dict, messages: list[dict], headers=None) -> str | None:
     """Stable per-conversation thread for interrupt/resume.
 
@@ -100,12 +120,19 @@ async def chat_completions(req: Request):
     messages = _filter_messages(body.get("messages", []))
 
     agent: ERPAgent = _state["agent"]
-    # Stable thread per conversation so multi-turn confirmation resumes correctly.
-    # Priority: Open WebUI identity headers (R7) > explicit client session_id/id
-    # > hash of the first user message (see _derive_thread_id docstring).
-    thread_id = _derive_thread_id(body, messages, headers=req.headers)
-    answer = await agent.chat(messages, thread_id=thread_id,
-                              reset_if_fresh=not _explicit_session(body))
+    if _is_owui_task_prompt(messages):
+        # Open WebUI's own background task call (title/tags/follow-up/query
+        # generation) — answer it directly, never touch thread/checkpoint
+        # state (R7 hotfix, spec §8).
+        answer = await agent.answer_stateless(messages[0]["content"])
+    else:
+        # Stable thread per conversation so multi-turn confirmation resumes
+        # correctly. Priority: Open WebUI identity headers (R7) > explicit
+        # client session_id/id > hash of the first user message (see
+        # _derive_thread_id docstring).
+        thread_id = _derive_thread_id(body, messages, headers=req.headers)
+        answer = await agent.chat(messages, thread_id=thread_id,
+                                  reset_if_fresh=not _explicit_session(body))
 
     cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())

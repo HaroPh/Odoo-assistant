@@ -125,3 +125,25 @@ async def test_default_false_preserves_resume_semantics():
     agent._checkpointer.adelete_thread.assert_not_awaited()
     sent = graph.ainvoke.await_args.args[0]
     assert isinstance(sent, Command) and sent.resume is True
+
+
+# ── R7 hotfix (live-verify 2026-07-09): stateless answer path for Open WebUI's
+# own background task calls (title/tags/follow-up-gen) — must NEVER touch
+# thread/checkpoint state (no graph, no checkpointer at all).
+
+async def test_answer_stateless_uses_chitchat_llm_never_touches_graph():
+    graph = _FakeGraph(_parked_snapshot(), {"messages": [AIMessage(content="unused")]})
+    agent = _agent_with(graph)
+    agent._llms["chitchat"] = MagicMock()
+    agent._llms["chitchat"].ainvoke = AsyncMock(
+        return_value=AIMessage(content='{"title": "Cabinet Pricing"}'))
+
+    answer = await agent.answer_stateless("### Task:\nGenerate a title...")
+
+    assert answer == '{"title": "Cabinet Pricing"}'
+    agent._llms["chitchat"].ainvoke.assert_awaited_once()
+    sent = agent._llms["chitchat"].ainvoke.await_args.args[0]
+    assert len(sent) == 1 and sent[0].content == "### Task:\nGenerate a title..."
+    graph.ainvoke.assert_not_awaited()
+    graph.aget_state.assert_not_awaited()
+    agent._checkpointer.adelete_thread.assert_not_awaited()
