@@ -9,6 +9,7 @@ import time
 from datetime import datetime
 
 # ── job modules đăng ký tại import (Task 3/4 thêm dòng ở đây) ────────────────
+from backend.jobs import eval_gate  # noqa: F401  (đăng ký side-effect)
 
 from backend.jobs.registry import (INFRA_ERROR, JOBS, JobResult, write_result)
 
@@ -24,9 +25,14 @@ def main(argv=None) -> int:
     run_p.add_argument("job", choices=sorted(JOBS))
     run_p.add_argument("--scheduled", action="store_true",
                        help="đặt bởi Task Scheduler — job on-demand-only từ chối flag này")
-    for job in JOBS.values():
-        if job.add_args:
-            job.add_args(run_p)
+
+    # Chỉ gắn add_args của ĐÚNG job được chọn — không gắn tất cả job đã đăng ký
+    # lên chung 1 subparser, tránh đụng tên flag giữa các job không liên quan
+    # (vd 2 job cùng có --model). Pre-parse chỉ để đọc args.job, còn lại bỏ qua.
+    pre, _ = ap.parse_known_args(argv)
+    selected = JOBS.get(getattr(pre, "job", None))
+    if selected and selected.add_args:
+        selected.add_args(run_p)
 
     args = ap.parse_args(argv)
 
