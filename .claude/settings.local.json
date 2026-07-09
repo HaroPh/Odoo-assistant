@@ -29,7 +29,13 @@
       "Bash(.venv/Scripts/python.exe -m pytest mcp-servers/odoo/tests/test_write_tools.py -v)",
       "Bash(bash C:/Users/ADMIN/.claude/plugins/cache/claude-plugins-official/superpowers/6.0.3/skills/subagent-driven-development/scripts/review-package 7bbb5fb HEAD)",
       "Bash(bash C:/Users/ADMIN/.claude/plugins/cache/claude-plugins-official/superpowers/6.0.3/skills/subagent-driven-development/scripts/task-brief docs/superpowers/plans/2026-06-26-t2-simple-write-tools.md 2)",
-      "Bash(.venv/Scripts/python.exe -m pytest mcp-servers/odoo/tests/test_write_tools.py -k invoice -v)"
+      "Bash(.venv/Scripts/python.exe -m pytest mcp-servers/odoo/tests/test_write_tools.py -k invoice -v)",
+      "Bash(.venv/Scripts/python.exe -m pytest mcp-servers/odoo/tests/test_write_tools.py -k create_quotation -q)",
+      "Bash(DATABASE_URL=\"postgresql://admin:772466070c7b40c2846147c2ee025ed39e55bee4@localhost:5433/ai_assistant\" .venv/Scripts/python.exe -m backend.src.rag.seed.build_seed)",
+      "Bash(cd /d/changai 2>/dev/null && echo \"=== SETTINGS DOCTYPE FIELDS ===\" && grep -oE '\"fieldname\":\\\\s*\"[^\"]+\"|\"fieldtype\":\\\\s*\"[^\"]+\"' changai/changai/doctype/changai_settings/changai_settings.json | head -120)",
+      "Read(//d/changai/**)",
+      "Bash(cd /d/changai 2>/dev/null && echo \"=== auto_gen_api functions ===\" && grep -nE '^def |^@frappe|claude|anthropic|Anthropic|update_masterdata|build_.*index|def update_schema' changai/changai/api/v2/auto_gen_api.py | head -80 && echo \"\" && echo \"=== LOC ===\" && wc -l changai/changai/api/v2/auto_gen_api.py)",
+      "Bash(cd /d/changai 2>/dev/null && echo \"=== frontend structure ===\" && find frontend/src -maxdepth 2 -type f | head -40 && echo \"\" && echo \"=== deps ===\" && cat pyproject.toml)"
     ]
   }
 }
