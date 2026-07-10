@@ -16,9 +16,9 @@ def _args(model=None, set_="both", pace=None):
 
 
 def _fake_eval(set_name, acc, false_confirm=0, n=40):
-    async def fn(llm, pace=0.0):
-        fn.calls.append({"pace": pace})
-        d = {"set": set_name, "n": n, "acc": acc, "fails": []}
+    async def fn(llm, pace=0.0, checkpoint_path=None):
+        fn.calls.append({"pace": pace, "checkpoint_path": checkpoint_path})
+        d = {"set": set_name, "n": n, "acc": acc, "fails": [], "errors": []}
         if set_name == "confirm":
             d["false_confirm"] = false_confirm
         return d
@@ -58,7 +58,7 @@ def test_intent_below_baseline_fails(monkeypatch):
 
 
 def test_eval_exception_exit_two(monkeypatch):
-    async def boom(llm, pace=0.0):
+    async def boom(llm, pace=0.0, checkpoint_path=None):
         raise ConnectionError("litellm chết")
     monkeypatch.setitem(eval_gate.EVAL_FN, "intent", boom)
     monkeypatch.setattr(run_eval, "_llm", lambda m: object())
@@ -113,11 +113,12 @@ def test_registered_and_schedulable():
 
 
 def _fake_chitchat_eval(violations=0, n=16):
-    async def fn(llm, pace=0.0):
-        fn.calls.append({"pace": pace})
+    async def fn(llm, pace=0.0, checkpoint_path=None):
+        fn.calls.append({"pace": pace, "checkpoint_path": checkpoint_path})
         fails = [{"text": "x", "response": "Đã tạo", "matched_markers": ["đã tạo"]}
                  for _ in range(violations)]
-        return {"set": "chitchat", "n": n, "violations": violations, "fails": fails}
+        return {"set": "chitchat", "n": n, "violations": violations,
+                "fails": fails, "errors": []}
     fn.calls = []
     return fn
 
@@ -181,3 +182,24 @@ def test_chitchat_registered_as_valid_set_choice():
     eval_gate.add_args(p)
     ns = p.parse_args(["--set", "chitchat"])
     assert ns.set == "chitchat"
+
+
+def test_result_errors_means_infra_error_not_gate(monkeypatch):
+    # S2 spec §3: đo không trọn vẹn → exit 2, KHÔNG có quyền PASS/FAIL —
+    # exit 1 phải luôn nghĩa là "model đo được và kém", không phải "mạng hỏng"
+    async def fn(llm, pace=0.0, checkpoint_path=None):
+        return {"set": "intent", "n": 40, "acc": 0.975, "fails": [],
+                "errors": [{"item": ["câu hỏi", "erp_read"],
+                            "error": "timeout", "attempts": 3}]}
+    monkeypatch.setitem(eval_gate.EVAL_FN, "intent", fn)
+    monkeypatch.setattr(run_eval, "_llm", lambda m: object())
+    result = eval_gate.run(_args(set_="intent"))
+    assert result.exit_code == INFRA_ERROR and result.verdict == "ERROR"
+    assert result.detail["intent"]["errors"][0]["error"] == "timeout"
+
+
+def test_checkpoint_path_passed_per_set(monkeypatch):
+    fi, fc = _patch(monkeypatch)
+    eval_gate.run(_args())
+    assert fi.calls[0]["checkpoint_path"].name == "_checkpoint-eval-gate-intent.json"
+    assert fc.calls[0]["checkpoint_path"].name == "_checkpoint-eval-gate-confirm.json"

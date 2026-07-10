@@ -7,12 +7,15 @@ lời đúng câu hỏi "config production hiện tại còn khỏe so với bas
 --model đo candidate trước khi flip; --set đo riêng 1 set khi xét flip 1 role
 (bài học Task 6 Phase A: candidate pass intent nhưng fail confirm → flip router-only).
 Pacing auto (R8): cloud 5s/call (RPM=15), local 0.
+S2: mỗi case retry bounded (resilience.py); case lỗi sau retry → INFRA_ERROR
+(đo không trọn vẹn), circuit-breaker dừng sớm khi lỗi hệ thống.
 """
 import asyncio
 import json
 from pathlib import Path
 
 from backend.evals import run_eval
+from backend.jobs import registry
 from backend.jobs.registry import (GATE_FAIL, INFRA_ERROR, PASS, Job, JobResult,
                                    register)
 from backend.src.agents.models import is_qwen, model_for
@@ -59,9 +62,21 @@ def run(args) -> JobResult:
             base = None
             if set_name in BASELINES:
                 base = json.loads(BASELINES[set_name].read_text(encoding="utf-8"))
-            result = asyncio.run(EVAL_FN[set_name](run_eval._llm(model), pace=pace))
+            checkpoint = registry.LOGS_DIR / f"_checkpoint-eval-gate-{set_name}.json"
+            result = asyncio.run(EVAL_FN[set_name](
+                run_eval._llm(model), pace=pace, checkpoint_path=checkpoint))
         except Exception as e:  # noqa: BLE001 — hạ tầng (LiteLLM/key/model/baseline hỏng)
             detail[set_name] = {"model": model, "error": str(e)}
+            return JobResult("eval-gate", INFRA_ERROR, "ERROR", detail)
+        # S2 spec §3: có case lỗi sau retry = đo không trọn vẹn → INFRA_ERROR,
+        # không có quyền PASS/FAIL (exit 1 phải luôn nghĩa "model kém").
+        # CircuitBreakerOpen thì nổi từ asyncio.run vào except ở trên.
+        if result.get("errors"):
+            detail[set_name] = {"model": model, "pace": pace,
+                                "errors": result["errors"],
+                                "fails": result["fails"]}
+            print(f"[{set_name}] model={model} INFRA ERROR: "
+                  f"{len(result['errors'])} case lỗi sau retry — đo không trọn vẹn")
             return JobResult("eval-gate", INFRA_ERROR, "ERROR", detail)
         ok = _gate(set_name, result, base)
         any_fail |= not ok
