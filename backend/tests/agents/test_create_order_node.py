@@ -133,6 +133,44 @@ async def test_write_disabled_gate(monkeypatch):
     assert "chưa được kích hoạt" in res["messages"][-1].content
 
 
+@pytest.mark.asyncio
+async def test_empty_customer_asks_instead_of_bogus_disambiguation(monkeypatch):
+    # Finding 1 (live-test case 5.5): "tạo báo giá" mà không nêu khách → phải HỎI,
+    # KHÔNG resolve ref rỗng (Odoo coi "" là wildcard → disambiguation bừa).
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
+    called = {"resolve": False}
+
+    def _spy(*a, **k):
+        called["resolve"] = True
+        return _ok([{"id": 1, "name": "X", "score": 1}], False)
+
+    monkeypatch.setattr(co.sales, "find_customer", _spy)
+    graph = _graph(co.make_create_order_node(MagicMock(), [_fake_tool({})]))
+    cfg = {"configurable": {"thread_id": "t-empty-cust"}}
+    state = {"messages": [], "intent": "erp_write", "confirmed": None,
+             "pending_action": {"tool": "create_quotation",
+                                "args": {"partner_name": "",
+                                         "lines": [{"product": "Tủ", "qty": 1}]},
+                                "summary": "Tạo báo giá"}}
+    res = await graph.ainvoke(state, cfg)
+    assert "__interrupt__" not in res
+    assert "khách hàng" in res["messages"][-1].content.lower()
+    assert called["resolve"] is False   # KHÔNG resolve ref rỗng
+
+
+@pytest.mark.asyncio
+async def test_empty_lines_asks_for_products(monkeypatch):
+    # Finding 1: có khách nhưng không nêu sản phẩm → HỎI, không tạo đơn rỗng.
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
+    monkeypatch.setattr(co.sales, "find_customer",
+                        lambda *a, **k: _ok([{"id": 41, "name": "Azur", "score": 1}], False))
+    graph = _graph(co.make_create_order_node(MagicMock(), [_fake_tool({})]))
+    cfg = {"configurable": {"thread_id": "t-empty-lines"}}
+    res = await graph.ainvoke(_state([]), cfg)   # partner Azur, không dòng nào
+    assert "__interrupt__" not in res
+    assert "sản phẩm" in res["messages"][-1].content.lower()
+
+
 def _fake_envelope_tool(recorder):
     import json as _json
     t = MagicMock()

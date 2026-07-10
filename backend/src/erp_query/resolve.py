@@ -12,6 +12,12 @@ def _score(query: str, name: str) -> float:
 
 
 def resolve_entity(model: str, query: str, limit: int = 5, *, gw=None) -> dict:
+    if not (query or "").strip():
+        # Finding 1: truy vấn rỗng → Odoo name_search coi là wildcard, trả bừa
+        # các bản ghi → disambiguation vô nghĩa. Một tra cứu rỗng phải resolve
+        # về KHÔNG CÓ, không phải "tất cả". Không chạm gateway.
+        return ok({"matches": [], "needs_disambiguation": False},
+                  "Không tìm thấy (thiếu từ khóa tra cứu).")
     gw = gw or default_gateway()
     try:
         rows = gw.name_search(model, query, limit=limit)   # [(id, display_name), ...]

@@ -44,3 +44,16 @@ def test_resolve_multiple_with_one_exact_no_disambiguation():
     out = resolve_entity("res.partner", "Azur Interior",
                          gw=_gw([(41, "Azur Interior"), (52, "Azur Interior Plus")]))
     assert out["data"]["needs_disambiguation"] is False
+
+
+def test_resolve_blank_query_skips_wildcard_search():
+    # Finding 1: chuỗi rỗng/toàn khoảng trắng KHÔNG được chạm name_search — Odoo
+    # coi "" là wildcard → trả bừa các bản ghi → disambiguation vô nghĩa. Một
+    # truy vấn rỗng phải resolve về KHÔNG CÓ, không phải "tất cả".
+    ft = FakeTransport([(1, "khong-duoc-xuat-hien")])
+    for q in ("", "   "):
+        out = resolve_entity("res.partner", q, gw=Gateway(ft))
+        assert out["status"] == "success"
+        assert out["data"]["matches"] == []
+        assert out["data"]["needs_disambiguation"] is False
+    assert ft.calls == []   # transport không bao giờ bị gọi

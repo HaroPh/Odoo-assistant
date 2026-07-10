@@ -110,6 +110,13 @@ def make_order_node(tools, cfg: OrderCfg):
         partner_ref = args.get("partner_name") or ""
         raw_lines = args.get("lines") or []
 
+        # Finding 1: thiếu thông tin cốt lõi → HỎI, không resolve ref rỗng (Odoo
+        # coi "" là wildcard → disambiguation vô nghĩa) hay tạo đơn rỗng.
+        if not str(partner_ref).strip():
+            return _msg(f"Bạn cần cho biết {cfg.partner_label} nào để mình tạo đơn.")
+        if not raw_lines:
+            return _msg("Bạn cần cho biết (các) sản phẩm và số lượng để mình tạo đơn.")
+
         # 1) Resolve partner
         kind, val = resolve_entity_for_order(cfg.resolve_partner(partner_ref), partner_ref)
         if kind == "error":
