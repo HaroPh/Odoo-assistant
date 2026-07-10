@@ -63,3 +63,11 @@ def test_cloud_bound_prompts_have_no_think_suffix():
     # chit-chat (respond_unknown) giờ CÓ persona system prompt cloud → cũng không /no_think.
     from backend.src.agents.prompts import CHITCHAT_PROMPT
     assert "/no_think" not in CHITCHAT_PROMPT
+
+
+def test_local_prompts_keep_no_think():
+    # S4 (ADR-009): 3 prompt local giữ /no_think — guard chống rớt khi chỉnh tông.
+    from backend.src.agents.prompts import (SYSTEM_PROMPT, RAG_SYNTHESIS_PROMPT,
+                                            FUSION_PROMPT)
+    for p in (SYSTEM_PROMPT, RAG_SYNTHESIS_PROMPT, FUSION_PROMPT):
+        assert "/no_think" in p
