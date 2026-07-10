@@ -1,5 +1,6 @@
 # backend/src/agents/nodes.py
 import os
+import re
 import asyncio
 import json
 import time
@@ -110,6 +111,50 @@ def make_respond_unknown_node(llm):
 
 
 # ── erp_write_planner ─────────────────────────────────────────────────────────
+
+# A5 redefined (spec 2026-07-10-a5-planner-json-retry): qwen3:8b là model họ
+# thinking và WRITE_PLANNER_PROMPT không có /no_think — các dạng JSON hỏng
+# dễ đoán (khối <think>, markdown fence) cứu được tất định trước khi tốn
+# 1 call LLM sửa lỗi. Khóa #7 cấm escalate cloud; sau Phase B không còn
+# model local thứ 2 → retry CÙNG model, đúng 1 lần.
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
+
+_JSON_CORRECTION = (
+    "Câu trả lời trên không phải JSON hợp lệ. Trả lời LẠI CHỈ bằng JSON "
+    "đúng định dạng đã yêu cầu — không markdown fence, không giải thích, "
+    "không text nào khác."
+)
+
+
+def _try_loads(text: str) -> dict | None:
+    """json.loads trả dict, mọi thứ khác (parse fail / JSON không phải dict
+    như list, số) → None — plan bắt buộc là object."""
+    try:
+        result = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return result if isinstance(result, dict) else None
+
+
+def _parse_plan(raw: str) -> dict | None:
+    """Parse pipeline 2 tầng (spec §3.1). Tầng 1: loads thẳng. Tầng 2:
+    salvage tất định — strip mọi khối <think>…</think> rồi strip markdown
+    fence nếu nó bọc TOÀN BỘ phần còn lại. KHÔNG brace-extract tùy tiện
+    (có thể vớ JSON nháp trong khối think). None = không cứu được."""
+    text = raw.strip()
+    plan = _try_loads(text)
+    if plan is not None:
+        return plan
+    stripped = _THINK_RE.sub("", text).strip()
+    fence = _FENCE_RE.fullmatch(stripped)
+    if fence:
+        stripped = fence.group(1).strip()
+    plan = _try_loads(stripped)
+    if plan is not None:
+        logger.info("Write planner JSON salvaged (fence/think strip)")
+    return plan
+
 
 def make_erp_write_planner_node(llm):
     async def erp_write_planner(state: ERPAgentState) -> dict:
