@@ -156,6 +156,31 @@ def _parse_plan(raw: str) -> dict | None:
     return plan
 
 
+async def _plan_json(llm, system: str, messages: list) -> dict | None:
+    """Gọi planner LLM + parse, với đúng 1 lần corrective retry CÙNG model
+    khi lần đầu không parse được (A5 redefined — khóa #7 cấm escalate cloud,
+    không còn model local thứ 2 sau Phase B). 2 message sửa lỗi chỉ sống
+    trong lời gọi này — không rò vào state["messages"] (spec §3.2)."""
+    base = [SystemMessage(content=system), *messages]
+    response = await llm.ainvoke(base)
+    plan = _parse_plan(response.content)
+    if plan is not None:
+        return plan
+    logger.warning("Write planner returned non-JSON: %s", response.content)
+    retry = await llm.ainvoke([
+        *base,
+        AIMessage(content=response.content),
+        HumanMessage(content=_JSON_CORRECTION),
+    ])
+    plan = _parse_plan(retry.content)
+    if plan is not None:
+        logger.info("Write planner JSON retry succeeded")
+        return plan
+    logger.warning("Write planner returned non-JSON after 2 attempts: %s",
+                   retry.content)
+    return None
+
+
 def make_erp_write_planner_node(llm):
     async def erp_write_planner(state: ERPAgentState) -> dict:
         if not write_gate.write_actions_enabled():
@@ -171,14 +196,8 @@ def make_erp_write_planner_node(llm):
         wc = state.get("working_context")
         system = (render_working_context(wc) + "\n\n" + WRITE_PLANNER_PROMPT) \
             if wc else WRITE_PLANNER_PROMPT
-        response = await llm.ainvoke([
-            SystemMessage(content=system),
-            *state["messages"],
-        ])
-        try:
-            plan = json.loads(response.content.strip())
-        except json.JSONDecodeError:
-            logger.warning("Write planner returned non-JSON: %s", response.content)
+        plan = await _plan_json(llm, system, state["messages"])
+        if plan is None:
             return {"messages": [AIMessage(content="Không thể xác định thao tác cần thực hiện. Vui lòng mô tả rõ hơn.")],
                     "pending_action": None, "auto_chain": None}
 

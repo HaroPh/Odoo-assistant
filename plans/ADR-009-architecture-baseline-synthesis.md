@@ -66,7 +66,7 @@ Ba nguồn hội tụ về cùng một số kết luận. Bảng dưới gộp c
 
 | ID | Việc | Nguồn |
 |---|---|---|
-| S1 | **Escalation-on-validation-fail cho planner:** tường minh, tối đa 1 lần, sang model MẠNH hơn, TUYỆT ĐỐI không đổi provider ngầm. **RÀNG BUỘC M2 (review fable):** planner mang dữ liệu ghi → đích escalation KHÔNG được là cloud nếu vi phạm khóa #7; escalation local-only lại vướng VRAM 8GB (OLLAMA_MAX_LOADED_MODELS=1). A5 phải trả lời "escalate tới ĐÂU" trước khi làm — nếu không có đáp án sạch, drop A5 (nó vốn optional). | F9 + spec A5 |
+| S1 | **Escalation-on-validation-fail cho planner:** tường minh, tối đa 1 lần, sang model MẠNH hơn, TUYỆT ĐỐI không đổi provider ngầm. **RÀNG BUỘC M2 (review fable):** planner mang dữ liệu ghi → đích escalation KHÔNG được là cloud nếu vi phạm khóa #7; escalation local-only lại vướng VRAM 8GB (OLLAMA_MAX_LOADED_MODELS=1). A5 phải trả lời "escalate tới ĐÂU" trước khi làm — nếu không có đáp án sạch, drop A5 (nó vốn optional). **✅ REDEFINED + DONE 2026-07-10:** không có đáp án sạch cho "escalate tới đâu" (model local duy nhất còn qwen3:8b sau Phase B; cloud vi phạm khóa #7) → user quyết định redefine thành corrective-retry CÙNG model: parse pipeline 2 tầng (loads → salvage tất định strip <think>/fence) + retry đúng 1 lần kèm correction message; messages phụ không rò vào state; mọi plan cứu được vẫn qua confirm-gate (khóa #4). Spec docs/superpowers/specs/2026-07-10-a5-planner-json-retry-design.md | F9 + spec A5 |
 | S2 | **Chuẩn retry cho Job Runner:** bounded + checkpoint + circuit-breaker, 1 helper dùng chung — ✅ DONE 2026-07-10: `backend/jobs/resilience.py` (`run_resilient`), 3 eval fn dùng chung; lỗi hết-retry → `errors` riêng → INFRA_ERROR (bảo toàn exit contract 1=model-kém/2=không-đo-được); checkpoint là bằng chứng không phải resume; spec docs/superpowers/specs/2026-07-10-s2-job-runner-resilience-design.md | F15 |
 | S3 | **Toggle vận hành qua cơ chế Odoo-native** (WRITE_ACTIONS_ENABLED…) — không redeploy; secret ở secret-store đúng — ✅ DONE 2026-07-10 (vế toggle): đọc runtime từ ir.config_parameter key `erp_ai.write_actions_enabled` (backend `write_gate.py` + MCP server tự implement, cache TTL 5s, fail-closed; env var bị xóa hoàn toàn; setup 1 lần: tạo System Parameter value=true). CỐ Ý không qua erp_query gateway (denylist ir.config_parameter giữ nguyên). Vế "secret ở secret-store" NGOÀI scope — secrets vẫn ở .env local. Spec docs/superpowers/specs/2026-07-10-s3-odoo-native-write-toggle-design.md | F16 |
 | S4 | **Điều kiện hóa `/no_think` theo family model** — gộp Phase A2. **THU NHỎ sau QĐ M2 (review fable):** `/no_think` chỉ tồn tại ở 3 prompt (SYSTEM_PROMPT/erp_read, RAG_SYNTHESIS, FUSION — prompts.py:15,81,99) và CẢ BA đều Ở LẠI LOCAL theo M2; các prompt lên cloud (router/evaluator/chit-chat) vốn không có `/no_think`. S4 rút còn: verify + ghi chú "3 prompt local giữ nguyên /no_think, prompt cloud không thêm" — effort ≈ 0. | spec §3.2 |
@@ -121,7 +121,8 @@ Ba nguồn hội tụ về cùng một số kết luận. Bảng dưới gộp c
         → A4 Quota Guard (HẠ ưu tiên sau M2: chỉ 3 role nhẹ dùng cloud, 500–1500 RPD
           khó chạm với 1 user — re-evaluate sau 1–2 tuần telemetry A3; LiteLLM
           fallback→local đã chặn outage) 
-        → A5 planner escalation/S1 (optional; bị ràng buộc M2 — xem §2.2 S1)
+        → A5 planner escalation/S1 — ✅ REDEFINED + DONE 2026-07-10
+          (corrective-retry cùng model, không escalation — xem §2.2 S1)
         │
         ▼ (có thể song song từ A2)
    Phase C (Job Runner satellite)
