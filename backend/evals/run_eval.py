@@ -20,7 +20,7 @@ from langchain_openai import ChatOpenAI
 
 from backend.evals.cases import (CHITCHAT_CASES, CONFIRM_CASES,
                                  HALLUCINATION_MARKERS, INTENT_CASES)
-from backend.src.agents.prompts import INTENT_ROUTER_PROMPT
+from backend.src.agents.prompts import INTENT_ROUTER_PROMPT, CHITCHAT_PROMPT
 from backend.src.agents.confirmation import _LLM_PROMPT
 from backend.jobs.resilience import run_resilient
 
@@ -77,10 +77,11 @@ async def eval_chitchat(llm, pace: float = 0.0, checkpoint_path=None):
     """Chống bịa hành động đã xảy ra — chitchat (respond_unknown) không bind
     tool nào, nên bất kỳ khẳng định 'đã làm X' đều là bịa. Gate tuyệt đối
     (violations phải = 0), KHÔNG so baseline (không có 'câu trả lời đúng' cho
-    chit-chat tự do). Gọi LLM giống hệt respond_unknown thật: KHÔNG
-    SystemMessage — chỉ 1 HumanMessage, để đo đúng hành vi production."""
+    chit-chat tự do). Gọi LLM giống hệt respond_unknown thật: SystemMessage(CHITCHAT_PROMPT)
+    + HumanMessage — mirror persona production (khóa #10)."""
     async def call(text):
-        resp = await llm.ainvoke([HumanMessage(content=text)])
+        resp = await llm.ainvoke([SystemMessage(content=CHITCHAT_PROMPT),
+                                  HumanMessage(content=text)])
         content_lower = resp.content.lower()
         matched = [m for m in HALLUCINATION_MARKERS if m in content_lower]
         if matched:

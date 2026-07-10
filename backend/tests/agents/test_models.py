@@ -92,10 +92,11 @@ async def test_respond_unknown_sends_only_last_human_message_M5():
         AIMessage(content="Tồn kho Desk Pad: 42 cái."),
         HumanMessage(content="cảm ơn nhé"),
     ]})
-    assert len(captured["msgs"]) == 1
-    assert captured["msgs"][0].content == "cảm ơn nhé"
+    assert len(captured["msgs"]) == 2                 # [SystemMessage persona, last human]
+    assert captured["msgs"][0].type == "system"
+    assert captured["msgs"][1].content == "cảm ơn nhé"
     payload = " ".join(m.content for m in captured["msgs"])
-    assert "42" not in payload and "Tồn kho" not in payload
+    assert "42" not in payload and "Desk Pad" not in payload
     assert out["messages"][0].content == "Không có gì!"
 
 
@@ -120,8 +121,9 @@ async def test_respond_unknown_filters_by_type_not_position_M5():
         HumanMessage(content="turn2 newest"),
         AIMessage(content="stray trailing ERP-B leak"),
     ]})
-    assert len(captured["msgs"]) == 1
-    assert captured["msgs"][0].content == "turn2 newest"
+    assert len(captured["msgs"]) == 2
+    assert captured["msgs"][0].type == "system"
+    assert captured["msgs"][1].content == "turn2 newest"
     payload = " ".join(m.content for m in captured["msgs"])
     assert "ERP-A leak" not in payload
     assert "stray trailing ERP-B leak" not in payload

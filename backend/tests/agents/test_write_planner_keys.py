@@ -60,4 +60,6 @@ def test_cloud_bound_prompts_have_no_think_suffix():
     from backend.src.agents.confirmation import _LLM_PROMPT
     assert "/no_think" not in INTENT_ROUTER_PROMPT
     assert "/no_think" not in _LLM_PROMPT
-    # chit-chat (respond_unknown) không có system prompt riêng — không gì để pin
+    # chit-chat (respond_unknown) giờ CÓ persona system prompt cloud → cũng không /no_think.
+    from backend.src.agents.prompts import CHITCHAT_PROMPT
+    assert "/no_think" not in CHITCHAT_PROMPT

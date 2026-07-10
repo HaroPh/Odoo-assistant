@@ -68,13 +68,17 @@ async def test_marker_matching_is_case_insensitive():
     assert result["violations"] == len(CHITCHAT_CASES)
 
 
-async def test_calls_llm_with_only_human_message_no_system_prompt():
-    # Khóa đúng hành vi respond_unknown thật: KHÔNG SystemMessage.
+async def test_mirrors_respond_unknown_persona_system_prompt():
+    # Khóa đúng hành vi respond_unknown thật (sau persona): SystemMessage
+    # CHITCHAT_PROMPT + HumanMessage. Eval phải mirror y hệt production (khóa #10).
+    from backend.src.agents.prompts import CHITCHAT_PROMPT
     llm = _RecordingLLM()
     await run_eval.eval_chitchat(llm)
     for messages in llm.calls:
-        assert len(messages) == 1
-        assert messages[0].type == "human"
+        assert len(messages) == 2
+        assert messages[0].type == "system"
+        assert messages[0].content == CHITCHAT_PROMPT
+        assert messages[1].type == "human"
 
 
 async def test_pace_sleeps_between_calls(monkeypatch):

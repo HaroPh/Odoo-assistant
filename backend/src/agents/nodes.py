@@ -11,7 +11,7 @@ from langgraph.types import interrupt as _interrupt
 
 from .state import ERPAgentState
 from .prompts import (INTENT_ROUTER_PROMPT, SYSTEM_PROMPT, WRITE_PLANNER_PROMPT,
-                      WRITE_CONFIRM_PREFIX, render_working_context)
+                      WRITE_CONFIRM_PREFIX, CHITCHAT_PROMPT, render_working_context)
 from .write_registry import COORDINATED_TOOLS, expand_chain
 from ..rag.retrieve import retrieve
 from .synthesis import synthesize, SAFE_MSG
@@ -104,7 +104,7 @@ def make_respond_unknown_node(llm):
             (m for m in reversed(state["messages"]) if m.type == "human"), None)
         if last_human is None:
             return {"messages": [AIMessage(content="Xin lỗi, bạn cần hỗ trợ gì?")]}
-        response = await llm.ainvoke([last_human])
+        response = await llm.ainvoke([SystemMessage(content=CHITCHAT_PROMPT), last_human])
         return {"messages": [response]}
 
     return respond_unknown
