@@ -7,7 +7,7 @@ def test_action_confirm_is_whitelisted_as_write():
 
 def test_action_confirm_blocked_when_write_disabled(monkeypatch):
     # Gateway must refuse a write op while the flag is off.
-    monkeypatch.setattr(server, "WRITE_ENABLED", False)
+    monkeypatch.setattr(server, "write_actions_enabled", lambda: False)
     import pytest
     with pytest.raises(ValueError):
         server.odoo("sale.order", "action_confirm", [[1]])
@@ -77,3 +77,24 @@ def test_confirm_draft_calls_action_confirm(monkeypatch):
     out = _fn()("S00014")
     assert "đã xác nhận" in out.lower()
     assert confirms == [("sale.order", [[7]])]  # called once with the id
+
+
+def test_write_gate_fail_closed_when_odoo_unreachable(monkeypatch):
+    # cache module-level persist giữa các test — reset trước
+    server._write_gate_cache["expires_at"] = 0.0
+    def boom(*a, **k):
+        raise ConnectionError("odoo down")
+    monkeypatch.setattr(server, "odoo", boom)
+    assert server.write_actions_enabled() is False
+
+
+def test_write_gate_caches_within_ttl(monkeypatch):
+    server._write_gate_cache["expires_at"] = 0.0
+    calls = {"n": 0}
+    def fake_odoo(*a, **k):
+        calls["n"] += 1
+        return [{"id": 1, "value": "true"}]
+    monkeypatch.setattr(server, "odoo", fake_odoo)
+    assert server.write_actions_enabled() is True
+    assert server.write_actions_enabled() is True
+    assert calls["n"] == 1

@@ -25,7 +25,6 @@ ODOO_DB   = os.environ["ODOO_DB"]        # odoo
 ODOO_USER = os.environ["ODOO_USERNAME"]  # phamhao14170@gmail.com
 ODOO_PWD  = os.environ["ODOO_PASSWORD"]
 
-WRITE_ENABLED = os.environ.get("WRITE_ACTIONS_ENABLED", "false").lower() == "true"
 RATE_LIMIT    = int(os.environ.get("MCP_RATE_LIMIT", "60"))   # calls/phút
 DATABASE_URL  = os.environ.get("DATABASE_URL")               # log nếu có; không thì skip
 
@@ -156,11 +155,13 @@ def odoo(model: str, method: str, args: list, kwargs: dict | None = None,
                       operation=method, error_code="E403",
                       error_message=f"Method '{method}' không có trong whitelist")
         raise ValueError(f"Method '{method}' không được phép")
-    if op != "read" and not WRITE_ENABLED:
+    if op != "read" and not write_actions_enabled():
         log_mcp_event("permission_denied", tool_name=tool_name, model_name=model,
                       operation=op, error_code="E403",
-                      error_message="Write actions chưa bật (WRITE_ACTIONS_ENABLED=false)")
-        raise ValueError(f"Thao tác '{op}' bị chặn — WRITE_ACTIONS_ENABLED=false")
+                      error_message="Write actions đang tắt (toggle Odoo "
+                                    "erp_ai.write_actions_enabled)")
+        raise ValueError(f"Thao tác '{op}' bị chặn — write-mode đang tắt "
+                         "(erp_ai.write_actions_enabled)")
 
     if not check_rate_limit(tool_name or "default"):
         log_mcp_event("rate_limit", tool_name=tool_name, model_name=model, operation=op,
@@ -194,6 +195,36 @@ def odoo(model: str, method: str, args: list, kwargs: dict | None = None,
                       duration_ms=int((time.monotonic() - start) * 1000),
                       error_code="E500", error_message=str(e))
         raise
+
+# ─── Write toggle (S3) — đọc runtime từ Odoo, cache TTL, fail-closed ──────────
+
+_WRITE_GATE_KEY = "erp_ai.write_actions_enabled"
+_WRITE_GATE_TTL_S = 5.0
+_write_gate_cache = {"value": False, "expires_at": 0.0}
+
+
+def write_actions_enabled() -> bool:
+    """True chỉ khi ir.config_parameter[_WRITE_GATE_KEY] == "true" (strip+lower).
+    Đọc qua odoo() sẵn có: search_read được classify "read" nên KHÔNG đệ quy
+    qua nhánh chặn ghi. Fail-closed (spec §3): mọi lỗi đọc / key thiếu /
+    value khác "true" → False; kết quả lỗi cũng cache — không spam retry."""
+    now = time.monotonic()
+    if now < _write_gate_cache["expires_at"]:
+        return _write_gate_cache["value"]
+    try:
+        rows = odoo("ir.config_parameter", "search_read",
+                    [[("key", "=", _WRITE_GATE_KEY)]],
+                    {"fields": ["value"], "limit": 1},
+                    tool_name="write_gate_check")
+        # Odoo XML-RPC trả False (không phải None) cho char field rỗng → `or ""`
+        value = bool(rows) and str(rows[0].get("value") or "").strip().lower() == "true"
+    except Exception as e:  # noqa: BLE001 — fail-closed (spec §3)
+        log_mcp_event("write_gate_error", tool_name="write_gate_check",
+                      error_code="E503", error_message=str(e))
+        value = False
+    _write_gate_cache["value"] = value
+    _write_gate_cache["expires_at"] = now + _WRITE_GATE_TTL_S
+    return value
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
