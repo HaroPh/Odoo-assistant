@@ -8,6 +8,7 @@ Chạy (host, cần mcp-odoo SSE :8001 + litellm :4000 đang chạy):
 """
 import hashlib
 import json
+import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -17,7 +18,10 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.agents.erp_agent import ERPAgent
 
+logger = logging.getLogger(__name__)
+
 MODEL_ID = "erp-assistant"
+ERROR_MSG = "Xin lỗi, đã có lỗi xảy ra khi xử lý yêu cầu. Vui lòng thử lại."
 _state: dict = {}
 
 
@@ -127,19 +131,30 @@ async def chat_completions(req: Request):
     messages = _filter_messages(body.get("messages", []))
 
     agent: ERPAgent = _state["agent"]
-    if _is_owui_task_prompt(messages):
-        # Open WebUI's own background task call (title/tags/follow-up/query
-        # generation) — answer it directly, never touch thread/checkpoint
-        # state (R7 hotfix, spec §8).
-        answer = await agent.answer_stateless(messages[0]["content"])
-    else:
-        # Stable thread per conversation so multi-turn confirmation resumes
-        # correctly. Priority: Open WebUI identity headers (R7) > explicit
-        # client session_id/id > hash of the first user message (see
-        # _derive_thread_id docstring).
-        thread_id = _derive_thread_id(body, messages, headers=req.headers)
-        answer = await agent.chat(messages, thread_id=thread_id,
-                                  reset_if_fresh=not _explicit_session(body))
+    try:
+        if _is_owui_task_prompt(messages):
+            # Open WebUI's own background task call (title/tags/follow-up/query
+            # generation) — answer it directly, never touch thread/checkpoint
+            # state (R7 hotfix, spec §8).
+            answer = await agent.answer_stateless(messages[0]["content"])
+        else:
+            # Stable thread per conversation so multi-turn confirmation resumes
+            # correctly. Priority: Open WebUI identity headers (R7) > explicit
+            # client session_id/id > hash of the first user message (see
+            # _derive_thread_id docstring).
+            thread_id = _derive_thread_id(body, messages, headers=req.headers)
+            answer = await agent.chat(messages, thread_id=thread_id,
+                                      reset_if_fresh=not _explicit_session(body))
+    except Exception:
+        # Finding 2 (live-test 2026-07-10): a transient failure (cloud LLM
+        # hiccup/timeout/rate-limit) here used to propagate uncaught → FastAPI
+        # 500, forcing Open WebUI's own retry to paper over it (and the
+        # traceback was never captured — logs on this host truncate on every
+        # restart). rag_node/fusion_node already degrade to a safe message on
+        # failure; this is the same pattern at the endpoint's outermost layer,
+        # covering EVERY node (chitchat included, which lacked its own guard).
+        logger.exception("chat_completions failed")
+        answer = ERROR_MSG
 
     cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())

@@ -222,3 +222,58 @@ def test_endpoint_normal_message_still_uses_chat_not_stateless():
         assert len(agent.calls) == 1
     finally:
         main_mod._state.pop("agent", None)
+
+
+# ── Finding 2 (live-test 2026-07-10): agent.chat/answer_stateless lỗi thoáng
+# qua (vd cloud LLM hiccup) trước đây không được bắt → FastAPI trả 500 thô,
+# retry mới thành công. rag_node/fusion_node đều degrade về SAFE_MSG khi lỗi;
+# endpoint phải làm tương tự thay vì để lỗi rơi tới tận response layer.
+
+class _ExplodingAgent:
+    async def chat(self, messages, thread_id=None, reset_if_fresh=False):
+        raise ConnectionError("cloud LLM hiccup")
+
+    async def answer_stateless(self, content):
+        raise ConnectionError("cloud LLM hiccup")
+
+
+def test_endpoint_survives_agent_exception_returns_200_not_500():
+    main_mod._state["agent"] = _ExplodingAgent()
+    try:
+        client = TestClient(main_mod.app)
+        resp = client.post("/v1/chat/completions", json={
+            "messages": [{"role": "user", "content": "cảm ơn nhé"}], "stream": False})
+        assert resp.status_code == 200
+        content = resp.json()["choices"][0]["message"]["content"]
+        assert content == main_mod.ERROR_MSG
+    finally:
+        main_mod._state.pop("agent", None)
+
+
+def test_endpoint_exception_is_logged_with_traceback(caplog):
+    import logging
+    main_mod._state["agent"] = _ExplodingAgent()
+    try:
+        client = TestClient(main_mod.app)
+        with caplog.at_level(logging.ERROR, logger="src.main"):
+            client.post("/v1/chat/completions", json={
+                "messages": [{"role": "user", "content": "cảm ơn nhé"}], "stream": False})
+        assert any("cloud LLM hiccup" in r.message or
+                  (r.exc_info and "cloud LLM hiccup" in str(r.exc_info[1]))
+                  for r in caplog.records)
+    finally:
+        main_mod._state.pop("agent", None)
+
+
+def test_endpoint_survives_exception_in_stateless_task_prompt_path():
+    main_mod._state["agent"] = _ExplodingAgent()
+    try:
+        client = TestClient(main_mod.app)
+        resp = client.post("/v1/chat/completions", json={
+            "messages": [{"role": "user",
+                         "content": "### Task:\nSuggest a title..."}],
+            "stream": False})
+        assert resp.status_code == 200
+        assert resp.json()["choices"][0]["message"]["content"] == main_mod.ERROR_MSG
+    finally:
+        main_mod._state.pop("agent", None)
