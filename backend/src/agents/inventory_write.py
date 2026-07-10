@@ -3,14 +3,13 @@
 location by name, passed through to the MCP tool), show the target as a confirm
 draft, then set the on-hand quantity to that absolute value. Re-entrant, no LLM."""
 
-import os
-
 from langgraph.types import interrupt as _interrupt
 
 from .state import ERPAgentState
 from .tool_result import _tool_result_text
 from .create_order import (resolve_entity_for_order, _by_id, _ttl_expiry, _msg,
                            _disambig_q, WRITE_DISABLED_MSG)
+from . import write_gate
 from ..erp_query import inventory
 
 
@@ -31,7 +30,7 @@ def make_inventory_node(tools):
     by_name = {t.name: t for t in tools}
 
     async def inventory_adjust(state: ERPAgentState) -> dict:
-        if os.environ.get("WRITE_ACTIONS_ENABLED", "false").lower() != "true":
+        if not write_gate.write_actions_enabled():
             return _msg(WRITE_DISABLED_MSG)
 
         action = state.get("pending_action") or {}

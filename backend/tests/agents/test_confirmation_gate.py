@@ -8,6 +8,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
 from backend.src.agents.state import ERPAgentState
+from backend.src.agents import write_gate
 from backend.tests.conftest import make_mock_llm
 
 
@@ -22,8 +23,8 @@ def _write_state(text: str = "Tạo đơn") -> ERPAgentState:
 
 @pytest.mark.asyncio
 async def test_write_planner_locked_returns_not_activated(monkeypatch):
-    """When WRITE_ACTIONS_ENABLED != 'true', planner returns locked message."""
-    monkeypatch.delenv("WRITE_ACTIONS_ENABLED", raising=False)
+    """When write toggle is off, planner returns locked message."""
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: False)
 
     from backend.src.agents.nodes import make_erp_write_planner_node
     node = make_erp_write_planner_node(make_mock_llm("{}"))
@@ -38,7 +39,7 @@ async def test_write_planner_locked_returns_not_activated(monkeypatch):
 @pytest.mark.asyncio
 async def test_write_planner_enabled_calls_interrupt(monkeypatch):
     """When enabled, planner calls interrupt() with confirmation question."""
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
 
     plan_json = json.dumps({
         "tool": "create_sale_order",
@@ -73,7 +74,7 @@ async def test_write_planner_enabled_calls_interrupt(monkeypatch):
 @pytest.mark.asyncio
 async def test_planner_handles_missing_summary_key(monkeypatch):
     """When planner JSON has no 'summary' key, fallback to 'tool' value — no KeyError."""
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
 
     plan_json = json.dumps({
         "tool": "create_sale_order",
@@ -106,7 +107,7 @@ async def test_planner_handles_missing_summary_key(monkeypatch):
 @pytest.mark.asyncio
 async def test_write_planner_payload_carries_expires_at(monkeypatch):
     """Interrupt payload includes expires_at == now + CONFIRMATION_TTL_SECONDS."""
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setenv("CONFIRMATION_TTL_SECONDS", "300")
 
     plan_json = json.dumps({"tool": "confirm_sale_order", "args": {}, "summary": "x"})

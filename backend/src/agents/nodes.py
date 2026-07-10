@@ -16,6 +16,7 @@ from ..rag.retrieve import retrieve
 from .synthesis import synthesize, SAFE_MSG
 from .tool_result import _tool_result_text, parse_write_result
 from .working_context import derive_working_context, enforce_explicit_ref
+from . import write_gate
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +113,7 @@ def make_respond_unknown_node(llm):
 
 def make_erp_write_planner_node(llm):
     async def erp_write_planner(state: ERPAgentState) -> dict:
-        if os.environ.get("WRITE_ACTIONS_ENABLED", "false").lower() != "true":
+        if not write_gate.write_actions_enabled():
             return {"messages": [AIMessage(
                 content=(
                     "Tính năng ghi (tạo/sửa đơn hàng, cập nhật tồn kho) "

@@ -8,6 +8,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 from backend.src.agents.state import ERPAgentState
 import backend.src.agents.edit_order as eo
+from backend.src.agents import write_gate
 
 
 def _env_tool(name, capture):
@@ -50,7 +51,7 @@ def _detail(state="draft", lines=None):
 
 @pytest.mark.asyncio
 async def test_write_disabled_gate(monkeypatch):
-    monkeypatch.delenv("WRITE_ACTIONS_ENABLED", raising=False)
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: False)
     node = eo.make_edit_order_node([_env_tool("update_quotation_lines", {})], eo.SALE_EDIT_CFG)
     res = await _graph(node).ainvoke(
         _state([{"action": "set_qty", "product": "Large Cabinet", "qty": 5}]),
@@ -60,7 +61,7 @@ async def test_write_disabled_gate(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_empty_changes(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     node = eo.make_edit_order_node([_env_tool("update_quotation_lines", {})], eo.SALE_EDIT_CFG)
     res = await _graph(node).ainvoke(_state([]), {"configurable": {"thread_id": "d2"}})
     assert "sửa gì" in res["messages"][-1].content
@@ -68,7 +69,7 @@ async def test_empty_changes(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_order_not_found(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(eo.sales, "get_sale_order_detail",
                         lambda ref: {"status": "error", "display": "Không tìm thấy đơn 'S0'."})
     node = eo.make_edit_order_node([_env_tool("update_quotation_lines", {})], eo.SALE_EDIT_CFG)
@@ -79,7 +80,7 @@ async def test_order_not_found(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_set_qty_happy_path(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(eo.sales, "get_sale_order_detail", lambda ref: _detail())
     cap = {}
     node = eo.make_edit_order_node([_env_tool("update_quotation_lines", cap)], eo.SALE_EDIT_CFG)
@@ -97,7 +98,7 @@ async def test_set_qty_happy_path(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_remove_line_match(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(eo.sales, "get_sale_order_detail", lambda ref: _detail())
     cap = {}
     node = eo.make_edit_order_node([_env_tool("update_quotation_lines", cap)], eo.SALE_EDIT_CFG)
@@ -109,7 +110,7 @@ async def test_remove_line_match(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_add_resolves_product(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(eo.sales, "get_sale_order_detail", lambda ref: _detail())
     monkeypatch.setattr(eo.inventory, "find_product", lambda *a, **k: {
         "status": "success", "display": "x",
@@ -129,7 +130,7 @@ async def test_add_resolves_product(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_remove_no_match_terminal(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(eo.sales, "get_sale_order_detail", lambda ref: _detail())
     node = eo.make_edit_order_node([_env_tool("update_quotation_lines", {})], eo.SALE_EDIT_CFG)
     res = await _graph(node).ainvoke(
@@ -141,7 +142,7 @@ async def test_remove_no_match_terminal(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_multi_match_line_disambiguation(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     lines = [{"id": 101, "product_id": [552, "Cabinet"], "product_uom_qty": 2.0,
               "price_unit": 1.0, "price_subtotal": 2.0},
              {"id": 102, "product_id": [552, "Cabinet"], "product_uom_qty": 7.0,
@@ -161,7 +162,7 @@ async def test_multi_match_line_disambiguation(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_confirmed_order_offers_flag_note(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(eo.sales, "get_sale_order_detail", lambda ref: _detail(state="sale"))
     cap = {}
     flag = MagicMock(); flag.name = "flag_order_for_review"
@@ -188,7 +189,7 @@ async def test_confirmed_order_offers_flag_note(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_confirmed_order_decline_flag(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(eo.sales, "get_sale_order_detail", lambda ref: _detail(state="sale"))
     flag = MagicMock(); flag.name = "flag_order_for_review"
     called = []
@@ -204,7 +205,7 @@ async def test_confirmed_order_decline_flag(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_cancel_at_diff_confirm(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(eo.sales, "get_sale_order_detail", lambda ref: _detail())
     cap = {}
     node = eo.make_edit_order_node([_env_tool("update_quotation_lines", cap)], eo.SALE_EDIT_CFG)
@@ -217,7 +218,7 @@ async def test_cancel_at_diff_confirm(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_set_qty_zero_rejected(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(eo.sales, "get_sale_order_detail", lambda ref: _detail())
     node = eo.make_edit_order_node([_env_tool("update_quotation_lines", {})], eo.SALE_EDIT_CFG)
     res = await _graph(node).ainvoke(
@@ -230,7 +231,7 @@ async def test_set_qty_zero_rejected(monkeypatch):
 async def test_add_string_qty_rejected_no_crash(monkeypatch):
     # A local LLM can emit qty as a JSON string (e.g. "5"). Must not raise
     # TypeError from `"5" <= 0`; must return a friendly Vietnamese message.
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(eo.sales, "get_sale_order_detail", lambda ref: _detail())
     node = eo.make_edit_order_node([_env_tool("update_quotation_lines", {})], eo.SALE_EDIT_CFG)
     res = await _graph(node).ainvoke(
@@ -242,7 +243,7 @@ async def test_add_string_qty_rejected_no_crash(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_set_qty_string_qty_rejected_no_crash(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(eo.sales, "get_sale_order_detail", lambda ref: _detail())
     node = eo.make_edit_order_node([_env_tool("update_quotation_lines", {})], eo.SALE_EDIT_CFG)
     res = await _graph(node).ainvoke(
@@ -254,7 +255,7 @@ async def test_set_qty_string_qty_rejected_no_crash(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_add_none_qty_rejected_no_crash(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(eo.sales, "get_sale_order_detail", lambda ref: _detail())
     node = eo.make_edit_order_node([_env_tool("update_quotation_lines", {})], eo.SALE_EDIT_CFG)
     res = await _graph(node).ainvoke(
@@ -268,7 +269,7 @@ async def test_add_none_qty_rejected_no_crash(monkeypatch):
 async def test_write_disabled_never_wipes_working_context(monkeypatch):
     # Direct node call (not through graph) so an omitted key is ABSENT in the
     # raw return — the node-level omit-vs-None contract (see PR #7).
-    monkeypatch.delenv("WRITE_ACTIONS_ENABLED", raising=False)
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: False)
     node = eo.make_edit_order_node([_env_tool("update_quotation_lines", {})], eo.SALE_EDIT_CFG)
     state = _state([{"action": "remove", "product": "X"}])
     state["working_context"] = {"ref": "S00031", "model": "sale.order", "display": "x"}
@@ -279,7 +280,7 @@ async def test_write_disabled_never_wipes_working_context(monkeypatch):
 @pytest.mark.asyncio
 async def test_rfq_uses_purchase_detail_and_no_price(monkeypatch):
     # Purchase cfg: get_detail hits purchase, qty_field product_qty, price=False.
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     purch_detail = {"status": "success", "display": "x",
                     "data": {"order": {"id": 8, "name": "P00008",
                                        "partner_id": [70, "ACME"], "state": "draft"},

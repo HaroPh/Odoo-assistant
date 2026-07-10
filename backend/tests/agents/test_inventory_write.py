@@ -7,6 +7,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 from backend.src.agents.state import ERPAgentState
 import backend.src.agents.inventory_write as iw
+from backend.src.agents import write_gate
 
 
 def _fake_tool(recorder):
@@ -42,7 +43,7 @@ def _ok(matches, needs):
 
 @pytest.mark.asyncio
 async def test_happy_path_sets_qty_by_id(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(iw.inventory, "find_product",
                         lambda *a, **k: _ok([{"id": 552, "name": "Tủ", "score": 1}], False))
     monkeypatch.setattr(iw.inventory, "get_stock",
@@ -63,7 +64,7 @@ async def test_happy_path_sets_qty_by_id(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ambiguous_product(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(iw.inventory, "find_product", lambda *a, **k: _ok(
         [{"id": 552, "name": "Tủ lớn", "score": .6},
          {"id": 553, "name": "Tủ nhỏ", "score": .6}], True))
@@ -82,7 +83,7 @@ async def test_ambiguous_product(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_cancel(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(iw.inventory, "find_product",
                         lambda *a, **k: _ok([{"id": 552, "name": "Tủ", "score": 1}], False))
     monkeypatch.setattr(iw.inventory, "get_stock", lambda *a, **k: {"status": "success",
@@ -98,7 +99,7 @@ async def test_cancel(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_gate(monkeypatch):
-    monkeypatch.delenv("WRITE_ACTIONS_ENABLED", raising=False)
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: False)
     graph = _graph(iw.make_inventory_node([_fake_tool({})]))
     cfg = {"configurable": {"thread_id": "i4"}}
     res = await graph.ainvoke(_state({"product_name": "Tủ", "new_qty": 3}), cfg)

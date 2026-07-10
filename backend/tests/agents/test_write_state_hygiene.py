@@ -5,6 +5,7 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock
 from backend.src.agents.nodes import (make_erp_write_planner_node,
                                       make_erp_write_executor_node)
+from backend.src.agents import write_gate
 
 
 def _tool(name, ret):
@@ -86,7 +87,7 @@ async def test_executor_exception_path_clears_state():
 async def test_planner_json_error_clears_pending_action(monkeypatch):
     # Anti-regression for the stale-action bug: a parse failure MUST clear
     # pending_action or the router re-fires the previous write unconfirmed.
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     llm = MagicMock()
     llm.ainvoke = AsyncMock(return_value=MagicMock(content="not json"))
     node = make_erp_write_planner_node(llm)
@@ -96,7 +97,7 @@ async def test_planner_json_error_clears_pending_action(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_planner_write_disabled_clears_pending_action(monkeypatch):
-    monkeypatch.delenv("WRITE_ACTIONS_ENABLED", raising=False)
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: False)
     node = make_erp_write_planner_node(MagicMock())
     out = await node({"messages": []})
     assert out["pending_action"] is None

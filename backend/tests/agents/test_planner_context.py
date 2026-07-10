@@ -7,6 +7,7 @@ from backend.tests.conftest import make_mock_llm
 from backend.src.agents.prompts import WRITE_PLANNER_PROMPT, render_working_context
 import backend.src.agents.nodes as nodes_mod
 from backend.src.agents.nodes import make_erp_write_planner_node
+from backend.src.agents import write_gate
 
 WC = {"ref": "S00040", "model": "sale.order", "display": "Đã tạo báo giá S00040 (nháp)."}
 
@@ -34,7 +35,7 @@ def _plan_json(tool="confirm_sale_order", order_ref="S00040"):
 @pytest.mark.asyncio
 async def test_planner_injects_context_as_single_system_message(monkeypatch):
     # Invariant A: ONE SystemMessage carrying render + base prompt, context first.
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     _capture_interrupt(monkeypatch)
     llm = make_mock_llm(_plan_json())
     node = make_erp_write_planner_node(llm)
@@ -50,7 +51,7 @@ async def test_planner_injects_context_as_single_system_message(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_planner_without_context_uses_base_prompt_verbatim(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     _capture_interrupt(monkeypatch)
     llm = make_mock_llm(_plan_json())
     node = make_erp_write_planner_node(llm)
@@ -64,7 +65,7 @@ async def test_planner_without_context_uses_base_prompt_verbatim(monkeypatch):
 @pytest.mark.asyncio
 async def test_planner_explicit_ref_overrides_context_biased_plan(monkeypatch):
     # Invariant C layer 2: user names S00007; a context-biased LLM emitted S00040.
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     captured = _capture_interrupt(monkeypatch)
     llm = make_mock_llm(_plan_json(order_ref="S00040"))
     node = make_erp_write_planner_node(llm)
@@ -78,7 +79,7 @@ async def test_planner_explicit_ref_overrides_context_biased_plan(monkeypatch):
 @pytest.mark.asyncio
 async def test_planner_confirm_question_shows_tool_and_args(monkeypatch):
     # Invariant C layer 3: deterministic (tool: args) line, independent of summary.
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     captured = _capture_interrupt(monkeypatch)
     llm = make_mock_llm(_plan_json())
     node = make_erp_write_planner_node(llm)

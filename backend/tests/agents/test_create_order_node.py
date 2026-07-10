@@ -7,6 +7,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 from backend.src.agents.state import ERPAgentState
 import backend.src.agents.create_order as co
+from backend.src.agents import write_gate
 
 
 def _fake_tool(recorder):
@@ -43,7 +44,7 @@ def _ok(matches, needs):
 
 @pytest.mark.asyncio
 async def test_happy_path_creates_with_ids(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(co.sales, "find_customer",
                         lambda *a, **k: _ok([{"id": 41, "name": "Azur", "score": 1}], False))
     monkeypatch.setattr(co.inventory, "find_product",
@@ -67,7 +68,7 @@ async def test_happy_path_creates_with_ids(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ambiguous_customer_then_confirm(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(co.sales, "find_customer", lambda *a, **k: _ok(
         [{"id": 41, "name": "Azur Interior", "score": .6},
          {"id": 52, "name": "Azur Furniture", "score": .6}], True))
@@ -95,7 +96,7 @@ async def test_ambiguous_customer_then_confirm(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_cancel_does_not_create(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(co.sales, "find_customer",
                         lambda *a, **k: _ok([{"id": 41, "name": "Azur", "score": 1}], False))
     monkeypatch.setattr(co.inventory, "find_product",
@@ -114,7 +115,7 @@ async def test_cancel_does_not_create(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_zero_match_customer_is_terminal(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(co.sales, "find_customer", lambda *a, **k: _ok([], False))
     graph = _graph(co.make_create_order_node(MagicMock(), [_fake_tool({})]))
     cfg = {"configurable": {"thread_id": "t4"}}
@@ -125,7 +126,7 @@ async def test_zero_match_customer_is_terminal(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_write_disabled_gate(monkeypatch):
-    monkeypatch.delenv("WRITE_ACTIONS_ENABLED", raising=False)
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: False)
     graph = _graph(co.make_create_order_node(MagicMock(), [_fake_tool({})]))
     cfg = {"configurable": {"thread_id": "t5"}}
     res = await graph.ainvoke(_state([{"product": "Tủ", "qty": 1}]), cfg)
@@ -150,7 +151,7 @@ def _fake_envelope_tool(recorder):
 
 @pytest.mark.asyncio
 async def test_envelope_result_sets_last_write_not_raw_json(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(co.sales, "find_customer",
                         lambda *a, **k: _ok([{"id": 41, "name": "Azur", "score": 1}], False))
     monkeypatch.setattr(co.inventory, "find_product",
@@ -172,7 +173,7 @@ async def test_envelope_result_sets_last_write_not_raw_json(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_envelope_result_sets_working_context(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(co.sales, "find_customer",
                         lambda *a, **k: _ok([{"id": 41, "name": "Azur", "score": 1}], False))
     monkeypatch.setattr(co.inventory, "find_product",
@@ -200,7 +201,7 @@ async def test_write_disabled_gate_never_wipes_working_context(monkeypatch):
     # value rather than disappearing from the result — that persistence IS
     # the feature — so "absent from the raw return" is the node-level
     # contract this test pins, not "absent from the final graph state".)
-    monkeypatch.delenv("WRITE_ACTIONS_ENABLED", raising=False)
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: False)
     node = co.make_create_order_node(MagicMock(), [_fake_tool({})])
     state = _state([{"product": "Tủ", "qty": 1}])
     state["working_context"] = {"ref": "S00031", "model": "sale.order", "display": "x"}
@@ -230,7 +231,7 @@ async def test_create_tool_exception_never_wipes_working_context(monkeypatch):
     # correct assertion here is that working_context survives UNCHANGED,
     # proving the exception path never clobbers it — the graph-level
     # manifestation of the same omit-vs-None contract.
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(co.sales, "find_customer",
                         lambda *a, **k: _ok([{"id": 41, "name": "Azur", "score": 1}], False))
     monkeypatch.setattr(co.inventory, "find_product",

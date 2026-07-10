@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 import pytest
 
 from backend.src.agents.write_registry import expand_chain
+from backend.src.agents import write_gate
 
 
 # ── expand_chain (total function) ────────────────────────────────────────────
@@ -76,7 +77,7 @@ def _mk_llm(payload):
 
 @pytest.mark.asyncio
 async def test_planner_valid_chain_sets_auto_chain_and_note(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     llm = _mk_llm({"tool": "create_quotation",
                    "args": {"partner_name": "Azur",
                             "lines": [{"product": "Tủ", "qty": 2}]},
@@ -91,7 +92,7 @@ async def test_planner_valid_chain_sets_auto_chain_and_note(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_planner_bogus_chain_falls_back_single_step(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     llm = _mk_llm({"tool": "create_quotation",
                    "args": {"partner_name": "Azur", "lines": []},
                    "summary": "Tạo báo giá", "chain_until": "frobnicate"})
@@ -102,7 +103,7 @@ async def test_planner_bogus_chain_falls_back_single_step(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_planner_noncoordinated_chain_note_in_confirm(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     captured = {}
     monkeypatch.setattr(nodes_mod, "_interrupt",
                         lambda p: captured.update(p) or True)
@@ -117,14 +118,14 @@ async def test_planner_noncoordinated_chain_note_in_confirm(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_planner_gate_return_has_auto_chain_key(monkeypatch):
-    monkeypatch.delenv("WRITE_ACTIONS_ENABLED", raising=False)
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: False)
     out = await make_erp_write_planner_node(MagicMock())(_pstate("x"))
     assert "auto_chain" in out and out["auto_chain"] is None
 
 
 @pytest.mark.asyncio
 async def test_planner_non_json_return_has_auto_chain_key(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     out = await make_erp_write_planner_node(make_mock_llm("not json"))(_pstate("x"))
     assert "auto_chain" in out and out["auto_chain"] is None
 
@@ -271,7 +272,7 @@ def _ok_env(matches, needs=False):
 
 @pytest.mark.asyncio
 async def test_create_order_confirm_shows_chain_note(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(co.sales, "find_customer",
                         lambda *a, **k: _ok_env([{"id": 41, "name": "Azur", "score": 1}]))
     monkeypatch.setattr(co.inventory, "find_product",
@@ -337,7 +338,7 @@ def _write_graph(llm, tools):
 
 @pytest.mark.asyncio
 async def test_two_step_chain_one_confirm_end_to_end(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(co.sales, "find_customer",
                         lambda *a, **k: _ok_env([{"id": 41, "name": "Azur", "score": 1}]))
     monkeypatch.setattr(co.inventory, "find_product",

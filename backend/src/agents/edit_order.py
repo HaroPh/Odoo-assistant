@@ -4,7 +4,6 @@ purchase = update_rfq_lines). Only draft/sent orders are line-edited; a confirme
 order instead offers to post an internal review note (message_post). Mirrors
 create_order.py: re-entrant via interrupt-replay, no LLM, cfg-parameterized."""
 
-import os
 from dataclasses import dataclass
 from typing import Callable
 
@@ -16,6 +15,7 @@ from .create_order import (
 )
 from .tool_result import parse_write_result
 from .working_context import derive_working_context
+from . import write_gate
 from ..erp_query import sales, inventory, purchase
 
 FLAG_TOOL = "flag_order_for_review"
@@ -96,7 +96,7 @@ def make_edit_order_node(tools, cfg: EditCfg):
     by_name = {t.name: t for t in tools}
 
     async def edit_node(state):
-        if os.environ.get("WRITE_ACTIONS_ENABLED", "false").lower() != "true":
+        if not write_gate.write_actions_enabled():
             return _msg(WRITE_DISABLED_MSG)
 
         action = state.get("pending_action") or {}

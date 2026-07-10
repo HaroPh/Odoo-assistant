@@ -15,6 +15,7 @@ from langgraph.types import interrupt as _interrupt
 from .state import ERPAgentState
 from .tool_result import parse_write_result
 from .working_context import derive_working_context
+from . import write_gate
 from ..erp_query import sales, inventory, purchase
 
 WRITE_DISABLED_MSG = ("Tính năng ghi (tạo/sửa đơn hàng, cập nhật tồn kho) "
@@ -101,7 +102,7 @@ def make_order_node(tools, cfg: OrderCfg):
     by_name = {t.name: t for t in tools}
 
     async def order_node(state: ERPAgentState) -> dict:
-        if os.environ.get("WRITE_ACTIONS_ENABLED", "false").lower() != "true":
+        if not write_gate.write_actions_enabled():
             return _msg(WRITE_DISABLED_MSG)
 
         action = state.get("pending_action") or {}

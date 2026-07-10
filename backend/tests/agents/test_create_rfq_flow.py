@@ -7,6 +7,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 from backend.src.agents.state import ERPAgentState
 import backend.src.agents.create_order as co
+from backend.src.agents import write_gate
 
 
 def _fake_tool(name, recorder):
@@ -43,7 +44,7 @@ def _ok(matches, needs):
 
 @pytest.mark.asyncio
 async def test_purchase_happy_path_no_price(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(co.purchase, "find_supplier",
                         lambda *a, **k: _ok([{"id": 7, "name": "Acme", "score": 1}], False))
     monkeypatch.setattr(co.inventory, "find_product",
@@ -67,7 +68,7 @@ async def test_purchase_happy_path_no_price(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_purchase_ambiguous_supplier(monkeypatch):
-    monkeypatch.setenv("WRITE_ACTIONS_ENABLED", "true")
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     monkeypatch.setattr(co.purchase, "find_supplier", lambda *a, **k: _ok(
         [{"id": 7, "name": "Acme Co", "score": .6},
          {"id": 8, "name": "Acme Ltd", "score": .6}], True))
@@ -87,7 +88,7 @@ async def test_purchase_ambiguous_supplier(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_purchase_gate(monkeypatch):
-    monkeypatch.delenv("WRITE_ACTIONS_ENABLED", raising=False)
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: False)
     graph = _graph(co.make_order_node([_fake_tool("create_rfq", {})], co.PURCHASE_CFG))
     cfg = {"configurable": {"thread_id": "p3"}}
     res = await graph.ainvoke(_state([{"product": "Tủ", "qty": 1}]), cfg)
