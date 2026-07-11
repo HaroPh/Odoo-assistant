@@ -32,7 +32,10 @@ def parse_pdf(path: str) -> list[dict]:
     blocks: list[dict] = []
     for pageno, page in enumerate(reader.pages, start=1):
         for line in (page.extract_text() or "").splitlines():
-            text = line.strip()
+            # pypdf maps some unrecognized glyphs (e.g. a custom bullet-point
+            # font) to U+0000 instead of dropping them; Postgres text columns
+            # reject NUL bytes outright, so strip them at the source.
+            text = line.replace("\x00", "").strip()
             if not text:
                 continue
             is_heading = bool(_HEADING_RE.match(text)) or (
