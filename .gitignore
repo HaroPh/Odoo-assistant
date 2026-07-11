@@ -13,7 +13,14 @@ __pycache__/
 .ruff_cache/
 
 # Reference third-party Odoo MCP addon (downloaded, not our code)
-mcp_server/
+mcp_server(refference)/
+
+# Local dev scripts / internal planning docs (not project deliverables)
+scripts/
+plans/
+
+# PDF-conversion tool venv (separate from main .venv, never bundled)
+.venv-pdftools/
 
 # Docker volumes / local data
 pgdata/
@@ -32,3 +39,8 @@ Thumbs.db
 
 # Internal planning docs (not project deliverables)
 docs/superpowers/
+
+# RAG test fixtures — generated at test-run time or manually dropped in for
+# ad-hoc pipeline testing, not meant to be tracked (see test_chunking_*.py,
+# which regenerate their own .docx/.xlsx fixtures on every run).
+backend/tests/rag/fixtures/
