@@ -23,3 +23,13 @@ def rag_conn():
 def clean_tables(rag_conn):
     rag_conn.execute("TRUNCATE rag_chunks, rag_documents CASCADE")
     yield rag_conn
+
+
+@pytest.fixture(autouse=True)
+def _rerank_off(monkeypatch):
+    """Mặc định TẮT reranker trong mọi test RAG — sau khi retrieve() nối vào
+    score_pairs thật, test cũ gọi retrieve() sẽ kích hoạt tải model 2.3GB từ
+    HuggingFace giữa pytest (máy có mạng — tải THẬT). Test rerank bật lại
+    bằng cách patch reranker.score_pairs trực tiếp (fake bỏ qua env) hoặc
+    setenv RAG_RERANK_ENABLED=1."""
+    monkeypatch.setenv("RAG_RERANK_ENABLED", "0")

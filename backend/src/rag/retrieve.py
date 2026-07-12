@@ -1,4 +1,7 @@
+import dataclasses
+
 from . import db as _db
+from . import reranker
 from .config import TOP_N, TOP_K, RRF_K, RAG_SCHEMA
 from .embed import embed_query
 from .ingest import segment_vi
@@ -39,8 +42,22 @@ def _rrf(dense: list[tuple], sparse: list[tuple]) -> dict:
     return acc
 
 
-def rerank(query: str, chunks: list[Chunk]) -> list[Chunk]:
-    return chunks  # Phase 2: pass-through (non-generative slot for a cross-encoder later)
+def rerank(query: str, chunks: list[Chunk]) -> tuple[list[Chunk], bool]:
+    """Cross-encoder rerank, fail-open (spec 2026-07-12 §3.3).
+
+    (chunks, False) khi reranker tắt/hỏng — nguyên trạng thứ tự RRF, đúng
+    hành vi trước khi có feature; (reordered, True) khi có điểm. Gọi
+    score_pairs qua module attr để test monkeypatch được. sorted ổn định:
+    điểm bằng nhau giữ nguyên thứ tự RRF."""
+    if not chunks:
+        return chunks, False
+    scores = reranker.score_pairs(query, [c.text for c in chunks])
+    if scores is None:
+        return chunks, False
+    order = sorted(range(len(chunks)), key=lambda i: scores[i], reverse=True)
+    reordered = [dataclasses.replace(chunks[i], rerank_score=scores[i], rank=pos)
+                 for pos, i in enumerate(order)]
+    return reordered, True
 
 
 def compress(query: str, chunks: list[Chunk], k: int) -> list[Chunk]:
@@ -59,19 +76,23 @@ def retrieve(query: str, k: int = TOP_K, conn=None) -> RetrievalResult:
         fused = _rrf(dense, sparse)
         ordered = sorted(fused.values(), key=lambda e: e["rrf"], reverse=True)
 
-        chunks: list[Chunk] = []
-        for rank, e in enumerate(ordered[:k]):
+        # Pool RỘNG (TOP_N) cho reranker chọn lọc, cắt k SAU rerank —
+        # cắt trước là bug: reranker chỉ nhận 6 chunk đã chốt (spec §1.2).
+        pool: list[Chunk] = []
+        for rank, e in enumerate(ordered[:TOP_N]):
             row = e["row"]
-            chunks.append(Chunk(
+            pool.append(Chunk(
                 chunk_id=row[0], doc_id=row[1], source_file=row[2], doc_title=row[3],
                 section_path=row[4], page=row[5], sheet=row[6], row_range=row[7],
                 text=row[8], dense_score=e["dense"], sparse_score=e["sparse"],
                 rrf_score=e["rrf"], rank=rank))
-        chunks = compress(query, rerank(query, chunks), k)
+        chunks, reranked = rerank(query, pool)
+        chunks = compress(query, chunks, k)
         return RetrievalResult(
             query=query, query_used=qseg, chunks=chunks,
             top_score=chunks[0].rrf_score if chunks else 0.0,
-            total_candidates=len(fused), method="hybrid-rrf")
+            total_candidates=len(fused),
+            method="hybrid-rrf+rerank" if reranked else "hybrid-rrf")
     finally:
         if own:
             conn.close()
