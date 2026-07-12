@@ -18,3 +18,13 @@ def make_mock_llm_seq(responses):
     llm.ainvoke = AsyncMock(
         side_effect=[AIMessage(content=r) for r in responses])
     return llm
+
+
+@pytest.fixture(autouse=True)
+def friction_log_path(tmp_path, monkeypatch):
+    """Mọi test ghi friction vào tmp — không làm bẩn logs/planner_friction.jsonl
+    thật. File thật là telemetry dùng để ra quyết định (spec 2026-07-12);
+    event từ test (model='mock') sẽ làm sai lệch tỷ lệ nếu lọt vào."""
+    p = tmp_path / "friction.jsonl"
+    monkeypatch.setenv("FRICTION_LOG_PATH", str(p))
+    return p

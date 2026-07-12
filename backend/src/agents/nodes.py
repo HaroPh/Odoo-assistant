@@ -5,6 +5,7 @@ import asyncio
 import json
 import time
 import logging
+from datetime import datetime
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langchain.agents import create_agent as _create_agent
 from langgraph.types import interrupt as _interrupt
@@ -18,6 +19,7 @@ from .synthesis import synthesize, SAFE_MSG
 from .tool_result import _tool_result_text, parse_write_result
 from .working_context import derive_working_context, enforce_explicit_ref
 from . import write_gate
+from .friction import log_friction
 
 logger = logging.getLogger(__name__)
 
@@ -137,15 +139,16 @@ def _try_loads(text: str) -> dict | None:
     return result if isinstance(result, dict) else None
 
 
-def _parse_plan(raw: str) -> dict | None:
-    """Parse pipeline 2 tầng (spec §3.1). Tầng 1: loads thẳng. Tầng 2:
-    salvage tất định — strip mọi khối <think>…</think> rồi strip markdown
-    fence nếu nó bọc TOÀN BỘ phần còn lại. KHÔNG brace-extract tùy tiện
-    (có thể vớ JSON nháp trong khối think). None = không cứu được."""
+def _parse_plan_tiered(raw: str) -> tuple[dict | None, str | None]:
+    """Parse pipeline 2 tầng (spec §3.1), trả thêm tier cứu được:
+    ("raw" | "salvage" | None). Tầng 1: loads thẳng. Tầng 2: salvage tất
+    định — strip mọi khối <think>…</think> rồi strip markdown fence nếu nó
+    bọc TOÀN BỘ phần còn lại. KHÔNG brace-extract tùy tiện (có thể vớ JSON
+    nháp trong khối think). (None, None) = không cứu được."""
     text = raw.strip()
     plan = _try_loads(text)
     if plan is not None:
-        return plan
+        return plan, "raw"
     stripped = _THINK_RE.sub("", text).strip()
     fence = _FENCE_RE.fullmatch(stripped)
     if fence:
@@ -153,18 +156,46 @@ def _parse_plan(raw: str) -> dict | None:
     plan = _try_loads(stripped)
     if plan is not None:
         logger.info("Write planner JSON salvaged (fence/think strip)")
+        return plan, "salvage"
+    return None, None
+
+
+def _parse_plan(raw: str) -> dict | None:
+    """Wrapper giữ contract cũ — 15 test A5 và mọi caller khác không đổi."""
+    plan, _tier = _parse_plan_tiered(raw)
     return plan
+
+
+def _friction_event(llm, outcome: str, tool, raw_len: list,
+                    excerpt: str | None = None) -> dict:
+    """Event schema spec §3.3. model LUÔN ép str() — MagicMock auto-attribute
+    không JSON-serializable, thiếu str() thì log_friction nuốt lỗi và test
+    wiring 'mất dòng' khó hiểu."""
+    return {
+        "ts": datetime.now().astimezone().isoformat(),
+        "source": "planner_json",
+        "outcome": outcome,
+        "tool": tool,
+        "model": str(getattr(llm, "model_name", "")),
+        "raw_len": raw_len,
+        "excerpt": excerpt,
+    }
 
 
 async def _plan_json(llm, system: str, messages: list) -> dict | None:
     """Gọi planner LLM + parse, với đúng 1 lần corrective retry CÙNG model
     khi lần đầu không parse được (A5 redefined — khóa #7 cấm escalate cloud,
     không còn model local thứ 2 sau Phase B). 2 message sửa lỗi chỉ sống
-    trong lời gọi này — không rò vào state["messages"] (spec §3.2)."""
+    trong lời gọi này — không rò vào state["messages"] (spec §3.2).
+    Mỗi lời gọi ghi đúng 1 friction event (spec 2026-07-12) — kể cả khi
+    thành công ngay, để có mẫu số tính tỷ lệ."""
     base = [SystemMessage(content=system), *messages]
     response = await llm.ainvoke(base)
-    plan = _parse_plan(response.content)
+    plan, tier = _parse_plan_tiered(response.content)
     if plan is not None:
+        log_friction(_friction_event(
+            llm, "raw" if tier == "raw" else "salvage",
+            plan.get("tool"), [len(response.content)]))
         return plan
     logger.warning("Write planner returned non-JSON: %s", response.content)
     retry = await llm.ainvoke([
@@ -172,12 +203,18 @@ async def _plan_json(llm, system: str, messages: list) -> dict | None:
         AIMessage(content=response.content),
         HumanMessage(content=_JSON_CORRECTION),
     ])
-    plan = _parse_plan(retry.content)
+    plan, tier = _parse_plan_tiered(retry.content)
     if plan is not None:
         logger.info("Write planner JSON retry succeeded")
+        log_friction(_friction_event(
+            llm, "retry_raw" if tier == "raw" else "retry_salvage",
+            plan.get("tool"), [len(response.content), len(retry.content)]))
         return plan
     logger.warning("Write planner returned non-JSON after 2 attempts: %s",
                    retry.content)
+    log_friction(_friction_event(
+        llm, "fail", None, [len(response.content), len(retry.content)],
+        excerpt=retry.content[:500]))
     return None
 
 

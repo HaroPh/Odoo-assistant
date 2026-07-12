@@ -116,3 +116,68 @@ async def test_node_retry_messages_do_not_leak_into_state(monkeypatch):
     assert out["pending_action"]["tool"] == "create_quotation"
     assert "messages" not in out
     assert llm.ainvoke.call_count == 2
+
+
+# ── Friction log wiring (spec 2026-07-12-planner-friction-log) ────────────────
+# Autouse fixture friction_log_path (conftest) đã trỏ FRICTION_LOG_PATH về tmp;
+# nhận nó làm arg để đọc lại event. Unpack `(ev,) = ...` khẳng định luôn
+# bất biến "đúng 1 dòng cho mỗi lời gọi _plan_json".
+import json as _json
+
+
+def _read_events(path):
+    return [_json.loads(l) for l in path.read_text(encoding="utf-8").splitlines()]
+
+
+async def test_friction_raw(friction_log_path):
+    llm = make_mock_llm_seq([VALID])
+    llm.model_name = "mock-model"
+    await _plan_json(llm, "SYS", [HumanMessage(content="x")])
+    (ev,) = _read_events(friction_log_path)
+    assert ev["outcome"] == "raw"
+    assert ev["tool"] == "create_quotation"
+    assert ev["model"] == "mock-model"
+    assert ev["raw_len"] == [len(VALID)]
+    assert ev["excerpt"] is None
+    assert ev["source"] == "planner_json"
+    assert "ts" in ev
+
+
+async def test_friction_salvage(friction_log_path):
+    raw = f"<think>nghĩ</think>\n{VALID}"
+    llm = make_mock_llm_seq([raw])
+    llm.model_name = "mock-model"
+    await _plan_json(llm, "SYS", [HumanMessage(content="x")])
+    (ev,) = _read_events(friction_log_path)
+    assert ev["outcome"] == "salvage"
+    assert ev["raw_len"] == [len(raw)]
+
+
+async def test_friction_retry_raw(friction_log_path):
+    llm = make_mock_llm_seq(["hỏng", VALID])
+    llm.model_name = "mock-model"
+    await _plan_json(llm, "SYS", [HumanMessage(content="x")])
+    (ev,) = _read_events(friction_log_path)
+    assert ev["outcome"] == "retry_raw"
+    assert ev["raw_len"] == [len("hỏng"), len(VALID)]
+
+
+async def test_friction_retry_salvage(friction_log_path):
+    fenced = f"```json\n{VALID}\n```"
+    llm = make_mock_llm_seq(["hỏng", fenced])
+    llm.model_name = "mock-model"
+    await _plan_json(llm, "SYS", [HumanMessage(content="x")])
+    (ev,) = _read_events(friction_log_path)
+    assert ev["outcome"] == "retry_salvage"
+
+
+async def test_friction_fail_has_excerpt(friction_log_path):
+    long_garbage = "x" * 700
+    llm = make_mock_llm_seq(["hỏng 1", long_garbage])
+    llm.model_name = "mock-model"
+    assert await _plan_json(llm, "SYS", [HumanMessage(content="x")]) is None
+    (ev,) = _read_events(friction_log_path)
+    assert ev["outcome"] == "fail"
+    assert ev["tool"] is None
+    assert len(ev["excerpt"]) == 500
+    assert long_garbage.startswith(ev["excerpt"])
