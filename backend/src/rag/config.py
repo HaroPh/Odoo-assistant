@@ -20,3 +20,7 @@ RAG_SCHEMA = os.environ.get("RAG_SCHEMA", "public")
 TOP_N = 20      # candidates per retriever before fusion
 TOP_K = 6       # final chunks returned
 RRF_K = 60      # RRF constant
+
+# Rerank (cross-encoder, CPU-only — spec 2026-07-12-rag-reranker)
+RERANK_MODEL = "BAAI/bge-reranker-v2-m3"
+RERANK_MAX_LENGTH = 512
