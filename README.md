@@ -75,6 +75,13 @@ accounting) that the MCP layer's allowlist deliberately excludes from the
 write path. This keeps "can look things up" and "can change things" as two
 different code paths with two different trust levels.
 
+**Entity resolution stays live-data-first.** Product/customer name lookup
+optionally fuses lexical search with a local trigram+vector index (fail-open,
+kill-switched) to handle typos, missing diacritics, and synonyms — but the
+index only ever proposes candidate IDs. Every candidate is re-verified
+against Odoo before being returned, so a stale index can miss a recent
+product, never misreport one.
+
 ## Key features
 
 - **Confirm-gated order lifecycle** — quotation → confirm → deliver → invoice
@@ -82,11 +89,14 @@ different code paths with two different trust levels.
   an explicit user confirmation before the next tool call.
 - **Entity disambiguation** — ambiguous customer/product references (or
   ambiguous order lines when editing) trigger a clarifying question instead of
-  guessing.
+  guessing; product lookup additionally tolerates missing diacritics, typos,
+  word-order, and synonyms via a local semantic layer, cross-encoder-scored
+  and re-verified live before ever being returned.
 - **RAG-grounded answers** — policy, pricing, and SOP questions are answered
   from an ingested document store (`.docx`/`.xlsx`/`.pdf`), never from model
-  memory; the synthesis prompt returns an explicit "not enough information"
-  sentinel rather than filling gaps.
+  memory, with cross-encoder reranking over the retrieved pool before
+  synthesis; the synthesis prompt returns an explicit "not enough
+  information" sentinel rather than filling gaps.
 - **Local-first data handling** — any model role that sees business data
   (product names, customer names, stock levels, internal documents) is pinned
   to a local model at the code layer; only the router, evaluator, and chitchat
@@ -103,6 +113,7 @@ different code paths with two different trust levels.
 | MCP tool surface | Deny-by-default method→operation map + per-caller rate limit | Calling an unmapped/unintended Odoo method |
 | Grounding | Explicit "don't fabricate" clauses + insufficient-info sentinel in every data-bearing prompt | The model inventing figures, policies, or completed actions |
 | Disambiguation | Never auto-selects on ambiguous entity match | Silently acting on the wrong customer/product |
+| Semantic resolution | Fail-open kill switch; index only proposes IDs, every candidate re-verified live before use | A Postgres/embedding outage blocking lookup, or a stale index misreporting a product |
 | Regression gate | Absolute gate on false-confirm rate and hallucination markers, baseline gate on intent accuracy | A model or prompt change silently degrading safety behavior |
 | Resilience | Bounded retry + circuit breaker on repeated failures | Burning quota / hammering a downstream outage |
 
@@ -112,7 +123,7 @@ different code paths with two different trust levels.
 - **Backend**: FastAPI, OpenAI-compatible `/v1/chat/completions`
 - **ERP integration**: MCP (Model Context Protocol) server over SSE + a direct XML-RPC query gateway, both against Odoo 19
 - **LLM serving**: Ollama (local: qwen3:8b, bge-m3) behind a LiteLLM proxy (adds cloud model routing for allowlisted roles)
-- **RAG store**: PostgreSQL + pgvector, hybrid retrieval (vector + full-text), Vietnamese word segmentation via `pyvi`
+- **RAG store**: PostgreSQL + pgvector, hybrid retrieval (vector + full-text) with cross-encoder reranking, Vietnamese word segmentation via `pyvi`
 - **Frontend**: Open WebUI (no custom UI — the OpenAI-compatible contract is the only integration surface)
 
 ## Project structure
@@ -128,7 +139,6 @@ backend/
 mcp-servers/
   odoo/            MCP server: 14 allowlisted write/action tools
 docker-compose.yml Postgres, Ollama, LiteLLM, Open WebUI
-plans/             Architecture decisions and specs (ADR history)
 ```
 
 ## Getting started
@@ -146,8 +156,9 @@ docker exec ollama ollama pull bge-m3
 # 3. Configure
 cp .env.example .env   # fill in Odoo credentials, secrets
 
-# 4. Start the MCP server + backend (Windows)
-./start-dev.ps1
+# 4. Start the MCP server, then the backend (separate terminals)
+python mcp-servers/odoo/server.py
+cd backend && python run.py
 ```
 
 Open WebUI is then reachable at `http://localhost:3000`, with the assistant
@@ -166,5 +177,6 @@ RAG tests need `DATABASE_URL` pointed at the running Postgres container; see
 ## Status
 
 This project evolves through documented architecture decisions rather than
-ad-hoc changes — see `plans/` for the full decision history, including what
-was deliberately deferred and why.
+ad-hoc changes: every feature is designed, spec'd, and reviewed before
+implementation, with what was deliberately deferred (and why) tracked
+alongside it.

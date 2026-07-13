@@ -18,6 +18,7 @@ mcp_server(refference)/
 # Local dev scripts / internal planning docs (not project deliverables)
 scripts/
 plans/
+start-dev.ps1
 
 # PDF-conversion tool venv (separate from main .venv, never bundled)
 .venv-pdftools/
