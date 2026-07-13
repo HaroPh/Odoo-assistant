@@ -32,7 +32,6 @@ def classify_operation(method: str) -> str | None:
 
 def sanitize_model(name: str) -> str:
     """Chặn injection qua tên model — chỉ cho [a-zA-Z0-9._]."""
-    name = name.strip() if name else name
     if not name or not re.match(r"^[a-zA-Z0-9._]+$", name):
         raise ValueError(f"Tên model không hợp lệ: {name!r}")
-    return name
+    return name.strip()

@@ -19,7 +19,7 @@ def test_classify_case_and_whitespace_insensitive():
 
 def test_sanitize_model_accepts_valid_names():
     assert security.sanitize_model("sale.order") == "sale.order"
-    assert security.sanitize_model(" product.product ") == "product.product"
+    assert security.sanitize_model("product.product") == "product.product"
 
 
 def test_sanitize_model_rejects_injection():
@@ -30,3 +30,12 @@ def test_sanitize_model_rejects_injection():
 def test_sanitize_model_rejects_empty():
     with pytest.raises(ValueError):
         security.sanitize_model("")
+
+
+def test_sanitize_model_rejects_leading_trailing_whitespace():
+    with pytest.raises(ValueError):
+        security.sanitize_model(" product.product ")
+    with pytest.raises(ValueError):
+        security.sanitize_model("  sale.order")
+    with pytest.raises(ValueError):
+        security.sanitize_model("account.invoice  ")
