@@ -5,7 +5,7 @@ WORKDIR /app
 # mcp[cli] kéo FastMCP + SSE transport; psycopg2 cho logging vào PostgreSQL
 RUN pip install --no-cache-dir "mcp[cli]>=1.0.0" "psycopg2-binary>=2.9"
 
-COPY server.py .
+COPY server.py config.py security.py rate_limit.py event_log.py helpers.py .
 
 EXPOSE 8001
 

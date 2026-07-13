@@ -5,123 +5,18 @@ Reads moved to backend/src/erp_query/ (Tasks 1–8).
 Transport: HTTP/SSE tại port 8001
 Connect:   http://mcp-odoo:8001/sse  (từ backend container)
 """
-import json
-import os
-import re
 import sys
 import time
-import threading
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
 import xmlrpc.client
 from mcp.server.fastmcp import FastMCP
 
+from config import ODOO_URL, ODOO_DB, ODOO_USER, ODOO_PWD
+from security import ODOO_METHOD_OPERATION_MAP, classify_operation, sanitize_model
+from rate_limit import check_rate_limit
+from event_log import log_mcp_event
+from helpers import now_iso, today_iso, resolve_unique, envelope
+
 mcp = FastMCP("odoo-mcp", host="0.0.0.0", port=8001)
-
-# ─── Config ───────────────────────────────────────────────────────────────────
-
-ODOO_URL  = os.environ["ODOO_URL"]       # http://host.docker.internal:8069
-ODOO_DB   = os.environ["ODOO_DB"]        # odoo
-ODOO_USER = os.environ["ODOO_USERNAME"]  # phamhao14170@gmail.com
-ODOO_PWD  = os.environ["ODOO_PASSWORD"]
-
-RATE_LIMIT    = int(os.environ.get("MCP_RATE_LIMIT", "60"))   # calls/phút
-DATABASE_URL  = os.environ.get("DATABASE_URL")               # log nếu có; không thì skip
-
-# ─── Security — port từ mcp_server addon (controllers/utils.py) ───────────────
-
-# Ánh xạ XML-RPC method → loại operation. Method không có trong map = bị từ chối
-# (deny-by-default). Phase 3 dùng "create|write|unlink" để biết cần confirmation gate.
-ODOO_METHOD_OPERATION_MAP = {
-    # READ — an toàn
-    "read": "read", "search": "read", "search_read": "read",
-    "search_count": "read", "name_search": "read", "fields_get": "read",
-    "read_group": "read", "formatted_read_group": "read",
-    "default_get": "read", "name_get": "read", "get_metadata": "read",
-    # CREATE — Phase 3: cần confirmation
-    "create": "create", "copy": "create", "name_create": "create",
-    "create_invoices": "create",
-    "action_create_invoice": "create",
-    # WRITE — Phase 3: cần confirmation
-    "write": "write", "toggle_active": "write",
-    "action_archive": "write", "message_post": "write",
-    "action_confirm": "write",
-    "button_confirm": "write",
-    "action_post": "write",
-    "button_validate": "write",
-    "action_apply_inventory": "write",
-    # UNLINK — Phase 3: cần confirmation + cảnh báo
-    "unlink": "unlink", "action_delete": "unlink",
-}
-
-def classify_operation(method: str) -> str | None:
-    """None = method không được phép (deny-by-default)."""
-    return ODOO_METHOD_OPERATION_MAP.get(str(method).lower().strip())
-
-def sanitize_model(name: str) -> str:
-    """Chặn injection qua tên model — chỉ cho [a-zA-Z0-9._]."""
-    if not name or not re.match(r"^[a-zA-Z0-9._]+$", name):
-        raise ValueError(f"Tên model không hợp lệ: {name!r}")
-    return name.strip()
-
-# ─── Rate limiting — sliding window in-memory (port từ rate_limiting.py) ───────
-
-_rate_cache: dict[str, list[datetime]] = defaultdict(list)
-_rate_lock = threading.Lock()
-
-def check_rate_limit(caller: str = "default") -> bool:
-    """True = còn trong giới hạn; False = vượt limit."""
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(minutes=1)
-    with _rate_lock:
-        _rate_cache[caller] = [t for t in _rate_cache[caller] if t > cutoff]
-        if len(_rate_cache[caller]) >= RATE_LIMIT:
-            return False
-        _rate_cache[caller].append(now)
-        return True
-
-# ─── Logging vào PostgreSQL (port pattern log_event từ mcp_log.py) ─────────────
-
-MAX_TEXT = 10_000
-_db_conn = None
-_db_lock = threading.Lock()
-
-def _truncate(text: str | None) -> str | None:
-    if text and len(text) > MAX_TEXT:
-        return text[:MAX_TEXT] + "... [truncated]"
-    return text
-
-def _get_db():
-    """Lazy connection, reconnect khi lỗi. None nếu không cấu hình DATABASE_URL."""
-    global _db_conn
-    if not DATABASE_URL:
-        return None
-    if _db_conn is None or getattr(_db_conn, "closed", 1):
-        import psycopg2
-        _db_conn = psycopg2.connect(DATABASE_URL)
-        _db_conn.autocommit = True
-    return _db_conn
-
-def log_mcp_event(event_type: str, *, tool_name=None, model_name=None,
-                  operation=None, duration_ms=None, error_code=None,
-                  error_message=None, caller="mcp-odoo") -> None:
-    """Ghi mcp_call_log. Mọi lỗi log đều nuốt — KHÔNG được làm hỏng tool."""
-    global _db_conn
-    try:
-        with _db_lock:
-            conn = _get_db()
-            if conn is None:
-                return
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO mcp_call_log
-                    (event_type, caller, tool_name, model_name, operation,
-                     duration_ms, error_code, error_message)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-                """, (event_type, caller, tool_name, model_name, operation,
-                      duration_ms, error_code, _truncate(error_message)))
-    except Exception:
-        _db_conn = None   # ép reconnect lần sau
 
 # ─── Odoo connection ──────────────────────────────────────────────────────────
 
@@ -225,39 +120,6 @@ def write_actions_enabled() -> bool:
     _write_gate_cache["value"] = value
     _write_gate_cache["expires_at"] = now + _WRITE_GATE_TTL_S
     return value
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-
-def today_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-def resolve_unique(rows, kind_label, describe, hint=""):
-    """Pick a single record from candidate rows, or describe the choices.
-
-    Returns (row, None) when exactly one candidate matches; (None, message)
-    when none match or several do. `describe(row)` returns a short
-    distinguishing string used in the multi-candidate listing. Reusable by
-    any resolution tool.
-    """
-    if not rows:
-        return None, f"Không tìm thấy {kind_label} nào phù hợp."
-    if len(rows) == 1:
-        return rows[0], None
-    listing = "\n".join(f"  • {describe(r)}" for r in rows)
-    msg = f"Có nhiều {kind_label}:\n{listing}"
-    if hint:
-        msg += f"\n{hint}"
-    return None, msg
-
-def envelope(ok: bool, display: str, *, ref=None, model=None,
-             res_id=None, state=None) -> str:
-    """JSON-string result for the invoice-chain tools (create_quotation,
-    confirm_sale_order, create_invoice_from_order, post_invoice). The backend
-    parses this to drive the write-continuation menu; `display` is the
-    user-facing Vietnamese sentence. Non-chain tools keep plain strings."""
-    return json.dumps({"ok": ok, "ref": ref, "model": model, "res_id": res_id,
-                       "state": state, "display": display}, ensure_ascii=False)
 
 # ─── TOOLS ───────────────────────────────────────────────────────────────────
 
