@@ -28,3 +28,11 @@ def friction_log_path(tmp_path, monkeypatch):
     p = tmp_path / "friction.jsonl"
     monkeypatch.setenv("FRICTION_LOG_PATH", str(p))
     return p
+
+
+@pytest.fixture(autouse=True)
+def semantic_resolve_off(monkeypatch):
+    """resolve_entity đi đường legacy từng bit trong test — không PG/Ollama,
+    không bao giờ chạm reranker 2.3GB (spec 2026-07-13 §11). Test nào bật
+    "1" phải mock cả semantic.semantic_candidates lẫn reranker.score_pairs."""
+    monkeypatch.setenv("ERP_SEMANTIC_RESOLVE", "0")
