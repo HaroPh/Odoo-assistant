@@ -1,0 +1,27 @@
+[
+  {"q": "Bàn học sinh gỗ MDF", "expect_code": "VN-BAN-01", "class": "control"},
+  {"q": "Ghế xoay văn phòng lưng lưới", "expect_code": "VN-GHE-01", "class": "control"},
+  {"q": "Đèn bàn LED chống cận", "expect_code": "VN-DEN-01", "class": "control"},
+  {"q": "VN-TU-01", "expect_code": "VN-TU-01", "class": "control"},
+
+  {"q": "ban hoc sinh", "expect_code": "VN-BAN-01", "class": "khong_dau"},
+  {"q": "ghe xoay van phong", "expect_code": "VN-GHE-01", "class": "khong_dau"},
+  {"q": "den ban led", "expect_code": "VN-DEN-01", "class": "khong_dau"},
+  {"q": "tu ho so", "expect_code": "VN-TU-01", "class": "khong_dau"},
+  {"q": "ke sach go", "expect_code": "VN-KE-01", "class": "khong_dau"},
+
+  {"q": "ghe xoai van phong", "expect_code": "VN-GHE-01", "class": "typo"},
+  {"q": "ban hoc sing", "expect_code": "VN-BAN-01", "class": "typo"},
+  {"q": "den ban lde", "expect_code": "VN-DEN-01", "class": "typo"},
+
+  {"q": "văn phòng ghế xoay", "expect_code": "VN-GHE-01", "class": "dao_tu"},
+  {"q": "gỗ MDF bàn học sinh", "expect_code": "VN-BAN-01", "class": "dao_tu"},
+  {"q": "LED đèn bàn", "expect_code": "VN-DEN-01", "class": "dao_tu"},
+
+  {"q": "ghế văn phòng có bánh xe", "expect_code": "VN-GHE-01", "class": "dong_nghia"},
+  {"q": "ghế ergonomic", "expect_code": "VN-GHE-02", "class": "dong_nghia"},
+  {"q": "đèn học", "expect_code": "VN-DEN-01", "class": "dong_nghia"},
+  {"q": "giá sách", "expect_code": "VN-KE-01", "class": "dong_nghia"},
+  {"q": "bàn cho bé học bài", "expect_code": "VN-BAN-01", "class": "dong_nghia"},
+  {"q": "chỗ ngồi làm việc xoay được", "expect_code": "VN-GHE-01", "class": "dong_nghia"}
+]
