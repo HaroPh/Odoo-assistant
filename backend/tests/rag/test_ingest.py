@@ -48,6 +48,32 @@ def test_ingest_replaces_changed_file_without_dupes(clean_tables, _mock_embed, t
     assert "14 ngày" in joined and "30 ngày" not in joined
 
 
+def test_ingest_same_file_from_different_cwd_does_not_duplicate(
+        clean_tables, _mock_embed, tmp_path, monkeypatch):
+    # Bug: doc_id was os.path.relpath(path), which is relative to the
+    # process's CWD at call time. Ingesting the SAME physical file via two
+    # different cwd-relative spellings (e.g. running the ingest CLI from the
+    # repo root vs. from backend/) must not create two rows for one document.
+    from backend.src.rag.ingest import ingest_path
+    sub = tmp_path / "seed"
+    sub.mkdir()
+    p = sub / "policy.docx"
+    _make_docx(str(p))
+
+    monkeypatch.chdir(tmp_path)
+    s1 = ingest_path("seed/policy.docx", conn=clean_tables)
+    assert s1["ingested"] == 1
+
+    monkeypatch.chdir(sub)
+    s2 = ingest_path("policy.docx", conn=clean_tables)      # same file, different cwd
+    assert s2["ingested"] == 0 and s2["skipped"] == 1
+
+    docs = clean_tables.execute("SELECT count(*) FROM rag_documents").fetchone()[0]
+    assert docs == 1
+    n = clean_tables.execute("SELECT count(*) FROM rag_chunks").fetchone()[0]
+    assert n == s1["chunks"]
+
+
 def test_ts_vector_is_populated(clean_tables, _mock_embed, tmp_path):
     from backend.src.rag.ingest import ingest_path
     p = str(tmp_path / "policy.docx")

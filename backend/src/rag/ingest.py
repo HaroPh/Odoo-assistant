@@ -27,11 +27,11 @@ def _hash(path: str) -> str:
 
 
 def _doc_id(path: str) -> str:
-    try:
-        return os.path.relpath(path).replace("\\", "/")
-    except ValueError:
-        # Different drive on Windows — use absolute path
-        return os.path.abspath(path).replace("\\", "/")
+    """Stable document identity, independent of the process's CWD at call
+    time — os.path.relpath(path) resolves against os.getcwd(), so the same
+    file ingested from two different working directories (e.g. repo root vs.
+    backend/) would get two different doc_ids and duplicate every chunk."""
+    return os.path.abspath(path).replace("\\", "/")
 
 
 def _chunks_for(path: str, kind: str, doc_id: str) -> list[dict]:
