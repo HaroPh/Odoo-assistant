@@ -807,12 +807,27 @@ def inventory_adjustment(new_qty: float, product_name: str = "",
             return msg
 
     if location_name:
+        # Odoo builds stock.location.complete_name from the warehouse's
+        # short CODE ("WH/Stock"), not its human display name — so a user
+        # naming their warehouse by its real name never matches on
+        # complete_name alone. Also search stock.warehouse.name and fold in
+        # its internal stock location as a candidate.
+        wh_rows = odoo("stock.warehouse", "search_read",
+                       [[["name", "ilike", location_name]]],
+                       {"fields": ["id", "name", "lot_stock_id"], "limit": 6})
         lrows = odoo("stock.location", "search_read",
                      [[["usage", "=", "internal"],
                        ["complete_name", "ilike", location_name]]],
                      {"fields": ["id", "complete_name"], "limit": 6})
+        candidates = {}
+        for w in wh_rows:
+            if w.get("lot_stock_id"):
+                lid, lname = w["lot_stock_id"]
+                candidates[lid] = {"id": lid, "complete_name": lname}
+        for r in lrows:
+            candidates.setdefault(r["id"], {"id": r["id"], "complete_name": r["complete_name"]})
         loc, lmsg = resolve_unique(
-            lrows, "vị trí kho",
+            list(candidates.values()), "vị trí kho",
             describe=lambda r: r["complete_name"],
             hint="Vui lòng nêu rõ tên vị trí kho.")
         if lmsg:

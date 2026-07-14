@@ -42,6 +42,39 @@ def test_id_path_unknown_product_id(monkeypatch):
     assert "999" in out and "Không tìm thấy" in out
 
 
+def test_location_name_resolves_by_warehouse_display_name(monkeypatch):
+    # Bug: stock.location.complete_name is built from the warehouse's short
+    # CODE ("WH/Stock" — see the fixture above), not its human display name
+    # ("Kho Hà Nội"). A user naming their warehouse by its real name never
+    # matched, and the failure only surfaced AFTER confirm (the draft shows
+    # the raw typed string). Resolution must also check stock.warehouse.name.
+    server = _reload_server(monkeypatch)
+    calls = []
+
+    def fake_odoo(model, method, args, kwargs=None, **kw):
+        calls.append((model, method, args, kwargs))
+        if model == "product.product" and method == "read":
+            return [{"id": 552, "name": "Tủ", "is_storable": True}]
+        if model == "stock.warehouse" and method == "search_read":
+            domain = args[0]
+            if any(cond[0] == "name" for cond in domain):
+                return [{"id": 3, "name": "Kho Hà Nội", "lot_stock_id": [8, "KHN/Stock"]}]
+            return []   # default-warehouse branch not used in this test
+        if model == "stock.location" and method == "search_read":
+            return []   # no location literally named "Kho Hà Nội"
+        if model == "stock.quant" and method == "search_read":
+            return [{"id": 1, "quantity": 4.0}]
+        if model == "stock.quant" and method == "action_apply_inventory":
+            return True
+        return []
+
+    monkeypatch.setattr(server, "odoo", fake_odoo)
+    out = server.inventory_adjustment(new_qty=10, product_id=552,
+                                      location_name="Kho Hà Nội")
+    assert "Không tìm thấy" not in out
+    assert "KHN/Stock" in out
+
+
 def test_name_path_still_works(monkeypatch):
     server = _reload_server(monkeypatch)
     calls = []
