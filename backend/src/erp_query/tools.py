@@ -30,7 +30,8 @@ def build_erp_query_tools() -> list:
     @tool
     def list_sale_orders(state: str = "", customer: str = "",
                          date_from: str = "", date_to: str = "") -> str:
-        """Liệt kê đơn bán; lọc theo state/khách/khoảng ngày (YYYY-MM-DD), bỏ trống = bỏ lọc."""
+        """Liệt kê đơn bán; lọc theo state/tên khách (chuỗi con, KHÔNG dùng ID
+        đã resolve từ find_customer)/khoảng ngày (YYYY-MM-DD), bỏ trống = bỏ lọc."""
         return _json(sales.list_sale_orders(state or None, customer or None,
                                             date_from or None, date_to or None))
 
@@ -56,18 +57,21 @@ def build_erp_query_tools() -> list:
 
     @tool
     def get_stock(product: str = "") -> str:
-        """Tồn kho nội bộ; lọc theo tên sản phẩm (bỏ trống = tất cả)."""
+        """Tồn kho nội bộ; lọc theo tên sản phẩm (chuỗi con, KHÔNG dùng ID đã
+        resolve từ find_product; bỏ trống = tất cả)."""
         return _json(inventory.get_stock(product or None))
 
     @tool
     def get_lots(product: str = "") -> str:
-        """Lô/sê-ri và tồn theo lô; lọc theo tên sản phẩm."""
+        """Lô/sê-ri và tồn theo lô; lọc theo tên sản phẩm (chuỗi con, KHÔNG
+        dùng ID đã resolve từ find_product)."""
         return _json(inventory.get_lots(product or None))
 
     @tool
     def list_purchase_orders(state: str = "", vendor: str = "",
                              date_from: str = "", date_to: str = "") -> str:
-        """Liệt kê đơn mua; lọc theo state/nhà cung cấp/khoảng ngày."""
+        """Liệt kê đơn mua; lọc theo state/tên nhà cung cấp (chuỗi con, KHÔNG
+        dùng ID đã resolve từ find_supplier)/khoảng ngày."""
         return _json(purchase.list_purchase_orders(state or None, vendor or None,
                                                    date_from or None, date_to or None))
 
@@ -78,7 +82,8 @@ def build_erp_query_tools() -> list:
 
     @tool
     def list_invoices(move_type: str, partner: str = "", payment_state: str = "") -> str:
-        """Hóa đơn đã phát hành; move_type = out_invoice (bán) | in_invoice (mua)."""
+        """Hóa đơn đã phát hành; move_type = out_invoice (bán) | in_invoice (mua);
+        partner lọc theo tên (chuỗi con, KHÔNG dùng ID)."""
         return _json(accounting.list_invoices(move_type, partner or None, payment_state or None))
 
     @tool
