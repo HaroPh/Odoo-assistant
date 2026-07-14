@@ -155,7 +155,6 @@ def _parse_plan_tiered(raw: str) -> tuple[dict | None, str | None]:
         stripped = fence.group(1).strip()
     plan = _try_loads(stripped)
     if plan is not None:
-        logger.info("Write planner JSON salvaged (fence/think strip)")
         return plan, "salvage"
     return None, None
 
@@ -205,7 +204,6 @@ async def _plan_json(llm, system: str, messages: list) -> dict | None:
     ])
     plan, tier = _parse_plan_tiered(retry.content)
     if plan is not None:
-        logger.info("Write planner JSON retry succeeded")
         log_friction(_friction_event(
             llm, "retry_raw" if tier == "raw" else "retry_salvage",
             plan.get("tool"), [len(response.content), len(retry.content)]))
