@@ -145,6 +145,17 @@ docker-compose.yml Postgres, Ollama, LiteLLM, Open WebUI
 
 **Prerequisites**: Docker, Python 3.11+, a running Odoo 19 instance.
 
+**Vietnamese diacritic-insensitive search**: name-substring lookups (customer,
+supplier, product) only match accent-free queries ("cong ty" → "Công ty") if
+PostgreSQL's `unaccent` extension is enabled on the Odoo database. One-time
+setup on the Odoo instance:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS unaccent;
+```
+
+Then set `unaccent = True` in `odoo.conf` and restart the Odoo service.
+
 ```bash
 # 1. Bring up Postgres, Ollama, LiteLLM, Open WebUI
 docker compose up -d
