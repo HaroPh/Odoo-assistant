@@ -63,7 +63,34 @@ async def test_happy_path_creates_with_ids(monkeypatch):
 
     res = await graph.ainvoke(Command(resume=True), cfg)
     assert "S00099" in res["messages"][-1].content
-    assert rec["args"] == {"partner_id": 41, "lines": [{"product_id": 552, "qty": 3}]}
+    assert rec["args"] == {"partner_id": 41,
+                           "lines": [{"product_id": 552, "qty": 3, "price_unit": 100000.0}]}
+
+
+@pytest.mark.asyncio
+async def test_create_tool_receives_confirmed_price(monkeypatch):
+    # Bug: get_product_price reads list_price (no pricelist — the read-only
+    # gateway can't call ORM pricelist methods), but create_quotation used to
+    # omit price_unit, so Odoo computed its OWN pricelist price at creation —
+    # diverging from the total the user just confirmed. What's confirmed must
+    # be what gets created.
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
+    monkeypatch.setattr(co.sales, "find_customer",
+                        lambda *a, **k: _ok([{"id": 41, "name": "Azur", "score": 1}], False))
+    monkeypatch.setattr(co.inventory, "find_product",
+                        lambda *a, **k: _ok([{"id": 552, "name": "Tủ", "score": 1}], False))
+    monkeypatch.setattr(co.sales, "get_product_price",
+                        lambda *a, **k: {"status": "success",
+                                         "data": {"price": 123456.0}, "display": "x"})
+    rec = {}
+    node = co.make_create_order_node(MagicMock(), [_fake_tool(rec)])
+    graph = _graph(node)
+    cfg = {"configurable": {"thread_id": "t-price"}}
+
+    await graph.ainvoke(_state([{"product": "Tủ", "qty": 3}]), cfg)
+    await graph.ainvoke(Command(resume=True), cfg)
+
+    assert rec["args"]["lines"] == [{"product_id": 552, "qty": 3, "price_unit": 123456.0}]
 
 
 @pytest.mark.asyncio

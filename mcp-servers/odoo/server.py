@@ -565,7 +565,9 @@ def create_quotation(partner_name: str = "", lines: list | None = None,
     Args:
         partner_name: Tên khách hàng (tìm gần đúng) — dùng khi không có partner_id.
         lines: Danh sách dòng hàng, mỗi dòng {"product": "<tên>", "qty": <số>} hoặc
-               {"product_id": <id>, "qty": <số>}.
+               {"product_id": <id>, "qty": <số>}, có thể kèm "price_unit": <số>
+               (giá đã xác nhận với người dùng — nếu vắng, Odoo tự tính theo
+               bảng giá của khách, có thể LỆCH với giá đã hỏi xác nhận).
         partner_id: ID khách hàng đã resolve (ưu tiên hơn partner_name).
     """
     lines = lines or []
@@ -586,15 +588,20 @@ def create_quotation(partner_name: str = "", lines: list | None = None,
     order_line = []
     for line in lines:
         pid = line.get("product_id")
+        price_unit = line.get("price_unit")
         if pid:
-            order_line.append((0, 0, {"product_id": pid,
-                                      "product_uom_qty": line["qty"]}))
+            vals = {"product_id": pid, "product_uom_qty": line["qty"]}
+            if price_unit is not None:
+                vals["price_unit"] = price_unit
+            order_line.append((0, 0, vals))
             continue
         prod, pmsg = _resolve_product(line["product"], "sale_ok")
         if pmsg:
             return envelope(False, pmsg)
-        order_line.append((0, 0, {"product_id": prod["id"],
-                                  "product_uom_qty": line["qty"]}))
+        vals = {"product_id": prod["id"], "product_uom_qty": line["qty"]}
+        if price_unit is not None:
+            vals["price_unit"] = price_unit
+        order_line.append((0, 0, vals))
 
     sid = odoo("sale.order", "create",
                [{"partner_id": partner["id"], "order_line": order_line}])

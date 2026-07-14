@@ -178,9 +178,13 @@ def make_order_node(tools, cfg: OrderCfg):
         if tool is None:
             return _msg("Công cụ tạo đơn không khả dụng.")
         try:
+            tool_lines = [
+                ({"product_id": l["product_id"], "qty": l["qty"],
+                  "price_unit": l["unit_price"]} if cfg.price
+                 else {"product_id": l["product_id"], "qty": l["qty"]})
+                for l in lines]
             result = await tool.ainvoke(
-                {"partner_id": partner["id"],
-                 "lines": [{"product_id": l["product_id"], "qty": l["qty"]} for l in lines]})
+                {"partner_id": partner["id"], "lines": tool_lines})
         except Exception as e:  # noqa: BLE001 — never crash the graph
             return _msg(f"Lỗi khi tạo đơn: {e}")
         display, env = parse_write_result(result)

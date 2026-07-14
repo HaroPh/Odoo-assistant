@@ -35,6 +35,34 @@ def test_id_path_builds_so_from_ids_without_resolving(monkeypatch):
     assert not any(c[0] == "product.product" for c in calls)
 
 
+def test_id_path_passes_through_confirmed_price_unit(monkeypatch):
+    # Bug: without price_unit, Odoo computes its own pricelist price at
+    # create time, diverging from the total the coordinator showed the user
+    # in the confirm question. When the caller supplies a confirmed price,
+    # it must be written verbatim onto the order line.
+    server = _reload_server(monkeypatch)
+    calls = []
+
+    def fake_odoo(model, method, args, kwargs=None, **kw):
+        calls.append((model, method, args, kwargs))
+        if model == "res.partner" and method == "read":
+            return [{"id": 41, "name": "Azur Interior"}]
+        if model == "sale.order" and method == "create":
+            return 99
+        if model == "sale.order" and method == "read":
+            return [{"name": "S00099"}]
+        return []
+
+    monkeypatch.setattr(server, "odoo", fake_odoo)
+    out = server.create_quotation(
+        partner_id=41,
+        lines=[{"product_id": 552, "qty": 3, "price_unit": 123456.0}])
+    assert "S00099" in out
+    create = next(c for c in calls if c[0] == "sale.order" and c[1] == "create")
+    line = create[2][0]["order_line"][0][2]
+    assert line["price_unit"] == 123456.0
+
+
 def test_id_path_unknown_partner_id(monkeypatch):
     server = _reload_server(monkeypatch)
     monkeypatch.setattr(server, "odoo", lambda *a, **k: [])
