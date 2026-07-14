@@ -45,3 +45,7 @@ docs/superpowers/
 # ad-hoc pipeline testing, not meant to be tracked (see test_chunking_*.py,
 # which regenerate their own .docx/.xlsx fixtures on every run).
 backend/tests/rag/fixtures/
+
+# RAG seed PDFs — large externally-sourced binaries (Vietnamese law texts),
+# not project deliverables; local corpus for dev/testing only.
+backend/src/rag/seed/law/
