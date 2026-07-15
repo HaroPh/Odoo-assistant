@@ -73,13 +73,17 @@ def _state(po_ref):
             "args": {"po_ref": po_ref}}}
 
 
-def _po_detail(qty=10.0, found=True):
+def _po_detail(qty=10.0, found=True, qtys=None):
     if not found:
         return {"status": "error", "data": None, "display": "Không tìm thấy đơn mua 'P00003'.",
                 "error": "not found"}
+    if qtys is not None:
+        lines = [{"product_id": [i + 1, f"SP{i + 1}"], "product_qty": q}
+                  for i, q in enumerate(qtys)]
+    else:
+        lines = [{"product_id": [1, "Tủ"], "product_qty": qty}]
     return {"status": "success",
-            "data": {"order": {"id": 9, "name": "P00003"},
-                     "lines": [{"product_id": [1, "Tủ"], "product_qty": qty}]},
+            "data": {"order": {"id": 9, "name": "P00003"}, "lines": lines},
             "display": "x"}
 
 
@@ -104,6 +108,36 @@ async def test_happy_path_match_and_qc_pass_receives(monkeypatch):
     res = await graph.ainvoke(Command(resume="pass"), cfg)
     assert "P00003" in res["messages"][-1].content
     assert calls["receive_args"] == {"order_ref": "P00003"}
+    assert res["pending_action"] is None
+
+
+@pytest.mark.asyncio
+async def test_multi_line_float_sum_matches_exactly_not_flagged(monkeypatch):
+    # sum([2.1, 2.2, 3.3]) == 7.6000000000000005 in raw IEEE-754 float, but a
+    # worker who correctly counts and reports "7.6" must be treated as an
+    # exact match (proceeds to QC / receive_order), not flagged short/excess.
+    assert sum([2.1, 2.2, 3.3]) != 7.6  # sanity: the float noise is real
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
+    monkeypatch.setattr(swr.purchase, "get_purchase_order_detail",
+                        lambda *a, **k: _po_detail(qtys=[2.1, 2.2, 3.3]))
+    tools, calls = _fake_tools()
+    node = swr.make_node(tools)
+    graph = _graph(node)
+    cfg = {"configurable": {"thread_id": "w1b"}}
+
+    res = await graph.ainvoke(_state("P00003"), cfg)
+    itr = res["__interrupt__"][0].value
+    assert itr["kind"] == "free_text" and "kiểm đếm" in itr["question"]
+
+    res = await graph.ainvoke(Command(resume="7.6"), cfg)
+    itr = res["__interrupt__"][0].value
+    assert itr["kind"] == "disambiguation" and "QC" in itr["question"]
+    assert "flag_args" not in calls
+
+    res = await graph.ainvoke(Command(resume="pass"), cfg)
+    assert "P00003" in res["messages"][-1].content
+    assert calls["receive_args"] == {"order_ref": "P00003"}
+    assert "flag_args" not in calls
     assert res["pending_action"] is None
 
 

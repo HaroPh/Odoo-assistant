@@ -74,14 +74,22 @@ def make_node(tools):
                     "pending_action": None}
         po_lines = (env.get("data") or {}).get("lines") or []
         expected_qty = sum(l.get("product_qty") or 0 for l in po_lines)
+        # round(): sum() of multiple PO line quantities in raw IEEE-754 float
+        # can land off the exact total (e.g. sum([2.1, 2.2, 3.3]) ==
+        # 7.6000000000000005) — quantities here are product units, so 3dp
+        # gives ample headroom above realistic fractional-unit precision
+        # (e.g. 1.5 kg) while absorbing float summation noise (~1e-15),
+        # mirroring the round() fix in skill_discount_quote.compute_discount_pct.
+        received_qty_r = round(received_qty, 3)
+        expected_qty_r = round(expected_qty, 3)
 
-        if received_qty != expected_qty:
+        if received_qty_r != expected_qty_r:
             tool = by_name.get("flag_order_for_review")
             if tool is None:
                 return {**_msg("Công cụ ghi chú đơn không khả dụng."), "pending_action": None}
-            short = received_qty < expected_qty
+            short = received_qty_r < expected_qty_r
             note = (f"{'Nhận thiếu' if short else 'Nhận thừa'} hàng: "
-                    f"thực nhận {received_qty:g}, PO {expected_qty:g}.")
+                    f"thực nhận {received_qty_r:g}, PO {expected_qty_r:g}.")
             try:
                 result = await tool.ainvoke({"model": "purchase.order",
                                              "order_ref": po_ref, "note": note})
