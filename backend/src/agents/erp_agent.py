@@ -87,6 +87,9 @@ async def _decide_resume(kind, options, question, reply, llm):
     disambiguation → parse the selection (deterministic) → resume the chosen id;
     next_action → parse the menu pick (ids are booleans; False = "Dừng" is a
     valid pick, so compare `is not None`) with a yes/no fallback;
+    free_text → resume the raw reply unchanged, no classification at all
+    (SOP-skill checkpoints needing an open-ended answer, e.g. a counted
+    quantity — coercing it through the yes/no classifier would destroy it);
     confirm (or unspecified) → classify yes/no → resume a bool. Ambiguous → re-ask."""
     if kind == "disambiguation":
         chosen = parse_selection(reply, options)
@@ -101,6 +104,8 @@ async def _decide_resume(kind, options, question, reply, llm):
         if verdict == UNCLEAR:
             return question or "Bạn muốn tiếp tục hay dừng? (chọn một mục hoặc có/không)"
         return Command(resume=verdict == CONFIRM)
+    if kind == "free_text":
+        return Command(resume=reply)
     verdict = await classify_confirmation(reply, llm)
     if verdict == UNCLEAR:
         return question or "Bạn xác nhận thực hiện thao tác này? (có / không)"
