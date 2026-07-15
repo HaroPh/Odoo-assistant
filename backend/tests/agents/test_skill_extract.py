@@ -37,3 +37,12 @@ def test_route_after_extract_ends_on_no_pending_action():
 
 def test_route_after_extract_ends_on_non_skill_tool():
     assert route_after_skill_extract({"pending_action": {"tool": "create_quotation"}}) == END
+
+
+def test_route_after_extract_no_longer_dispatches_warehouse_receiving():
+    # warehouse_receiving was removed from SKILLS on this branch (Task 1) —
+    # a tool referencing it must fall through to END, the same as any
+    # other unresolvable skill name, not dispatch to a node that no
+    # longer exists in the registry.
+    state = {"pending_action": {"tool": "skill:warehouse_receiving", "args": {}}}
+    assert route_after_skill_extract(state) == END
