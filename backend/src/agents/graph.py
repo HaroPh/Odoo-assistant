@@ -15,9 +15,16 @@ from .fusion import make_fusion_node
 from .write_registry import WRITE_COORDINATORS, COORDINATED_TOOLS
 from .continuation import make_write_continuation_node, _route_after_continuation
 from .models import llms_from_single
+from .skills import SKILLS, match_skill, make_skill_extract_node, route_after_skill_extract
+from . import skill_gate
 
 
 def _route_by_intent(state: ERPAgentState) -> str:
+    if skill_gate.skills_enabled():
+        last_human = next((m.content for m in reversed(state["messages"])
+                           if m.type == "human"), "")
+        if match_skill(last_human):
+            return "skill_extract"
     return state.get("intent") or "unknown"
 
 
@@ -49,16 +56,25 @@ def build_graph(llm, tools, checkpointer) -> object:
     for spec in WRITE_COORDINATORS.values():
         g.add_node(spec.node, spec.build(llms["planner"], tools))
     g.add_node("write_continuation", make_write_continuation_node())
+    g.add_node("skill_extract", make_skill_extract_node(llms["planner"]))
+    for spec in SKILLS.values():
+        g.add_node(spec.node, spec.build(tools))
+        g.add_edge(spec.node, END)
 
     g.set_entry_point("intent_router")
 
-    g.add_conditional_edges("intent_router", _route_by_intent, {
+    intent_targets = {
         "erp_read": "erp_read",
         "erp_write": "erp_write_planner",
         "rag": "rag",
         "mixed": "mixed",
         "unknown": "respond_unknown",
-    })
+        "skill_extract": "skill_extract",
+    }
+    g.add_conditional_edges("intent_router", _route_by_intent, intent_targets)
+    skill_targets = {END: END}
+    skill_targets.update({spec.node: spec.node for spec in SKILLS.values()})
+    g.add_conditional_edges("skill_extract", route_after_skill_extract, skill_targets)
 
     g.add_edge("erp_read", END)
     write_targets = {END: END, "erp_write_executor": "erp_write_executor"}

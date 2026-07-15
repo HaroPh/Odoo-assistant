@@ -4,6 +4,8 @@ from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
+from langchain_core.messages import HumanMessage
+
 from backend.src.agents.graph import build_graph
 
 
@@ -193,3 +195,45 @@ def test_build_graph_accepts_role_mapping(monkeypatch):
     assert captured["rag"] is not llms["fusion"]
     assert captured["mixed"] is not llms["synthesis"]
     assert captured["respond_unknown"] is not llms["router"]
+
+
+def test_build_graph_registers_skill_nodes():
+    graph = build_graph(MagicMock(), tools=[], checkpointer=None)
+    nodes = graph.get_graph().nodes
+    assert {"skill_extract", "skill_discount_quote", "skill_warehouse_receiving"} <= set(nodes)
+
+
+def test_skill_nodes_edge_straight_to_end():
+    graph = build_graph(MagicMock(), tools=[], checkpointer=None)
+    edges = [(e.source, e.target) for e in graph.get_graph().edges]
+    assert ("skill_discount_quote", "__end__") in edges
+    assert ("skill_warehouse_receiving", "__end__") in edges
+
+
+def test_route_by_intent_ignores_skills_when_flag_off(monkeypatch):
+    from backend.src.agents.graph import _route_by_intent
+    from backend.src.agents import skill_gate
+    monkeypatch.setattr(skill_gate, "skills_enabled", lambda: False)
+    state = {"messages": [HumanMessage(content="báo giá chiết khấu cho Azur")],
+            "intent": "erp_write"}
+    # Flag off → falls through to state["intent"], byte-identical to today,
+    # regardless of the trigger phrase being present in the message.
+    assert _route_by_intent(state) == "erp_write"
+
+
+def test_route_by_intent_routes_to_skill_extract_when_flag_on_and_triggered(monkeypatch):
+    from backend.src.agents.graph import _route_by_intent
+    from backend.src.agents import skill_gate
+    monkeypatch.setattr(skill_gate, "skills_enabled", lambda: True)
+    state = {"messages": [HumanMessage(content="báo giá chiết khấu cho Azur")],
+            "intent": "erp_write"}
+    assert _route_by_intent(state) == "skill_extract"
+
+
+def test_route_by_intent_flag_on_but_no_trigger_falls_through(monkeypatch):
+    from backend.src.agents.graph import _route_by_intent
+    from backend.src.agents import skill_gate
+    monkeypatch.setattr(skill_gate, "skills_enabled", lambda: True)
+    state = {"messages": [HumanMessage(content="xác nhận đơn S00012")],
+            "intent": "erp_write"}
+    assert _route_by_intent(state) == "erp_write"
