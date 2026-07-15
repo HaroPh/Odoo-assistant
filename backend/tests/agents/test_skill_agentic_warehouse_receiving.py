@@ -244,3 +244,13 @@ async def test_recursion_limit_bounds_a_looping_agent(monkeypatch):
     with pytest.raises(GraphRecursionError):
         await graph.ainvoke({"messages": [HumanMessage(content="nhập kho P00003")]}, cfg)
     assert call_count["n"] < 20  # bounded well below the ~25 LangGraph default
+
+
+def test_make_node_does_not_crash_with_empty_mcp_tools():
+    # Regression guard: _build_tools previously did unguarded by_name["receive_order"]
+    # indexing, which crashed build_graph(tools=[]) — an established test convention
+    # used throughout test_graph_build.py — at graph-CONSTRUCTION time, not request
+    # time. Any MCP tool-name gap would have taken down the entire app's graph, not
+    # just this one skill. Must build cleanly with fewer tools instead.
+    node = sawr.make_node(_SeqModel([AIMessage(content="ok")]), [])
+    assert node is not None

@@ -64,12 +64,12 @@ def ask_human(question: str) -> str:
 def _build_tools(mcp_tools):
     by_name = {t.name: t for t in mcp_tools}
     read_tools = {t.name: t for t in build_erp_query_tools()}
-    return [
-        ask_human,
-        read_tools["get_purchase_order_detail"],
-        by_name["receive_order"],
-        by_name["flag_order_for_review"],
-    ]
+    tools = [ask_human, read_tools["get_purchase_order_detail"]]
+    for name in ("receive_order", "flag_order_for_review"):
+        tool = by_name.get(name)
+        if tool is not None:
+            tools.append(tool)
+    return tools
 
 
 def make_node(llm, mcp_tools):
