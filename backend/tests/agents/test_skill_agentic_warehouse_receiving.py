@@ -328,3 +328,48 @@ async def test_confirm_gate_refusal_blocks_write():
     tool_texts = [m.content for m in res["messages"] if m.type == "tool"]
     assert any(sawr.REFUSED_MSG in t for t in tool_texts)
     assert res["messages"][-1].type == "ai"  # model vẫn chốt được câu trả lời
+
+
+@pytest.mark.asyncio
+async def test_flag_wrapper_hardcodes_model_param():
+    # Probe D (spec §1): qwythos-9b từng truyền model="P00003" thay vì
+    # "purchase.order". Wrapper thu hẹp schema loại lỗi này bằng cấu trúc:
+    # model không truyền được tham số `model`, wrapper tự điền giá trị đúng.
+    tools, calls = _recording_tools()
+    steps = [
+        AIMessage(content="", tool_calls=[
+            {"name": "flag_order_for_review",
+             "args": {"order_ref": "P00021",
+                      "note": "Thiếu hàng: nhận 7, PO 10."}, "id": "g3"}]),
+        AIMessage(content="Đã ghi chú."),
+    ]
+    graph = _graph(sawr.make_node(_SeqModel(steps), tools))
+    cfg = _cfg("g3")
+
+    res = await graph.ainvoke({"messages": [HumanMessage(content="nhập kho P00021")]}, cfg)
+    payload = res["__interrupt__"][0].value
+    assert payload["kind"] == "confirm"
+    assert "Thiếu hàng" in payload["question"]  # câu hỏi hiển thị note thật
+
+    await graph.ainvoke(Command(resume=True), cfg)
+    assert calls["flag"] == [{"model": "purchase.order", "order_ref": "P00021",
+                              "note": "Thiếu hàng: nhận 7, PO 10."}]
+
+
+def test_no_raw_write_tools_exposed_to_model():
+    # Bất biến cốt lõi (spec §4.1): model không bao giờ thấy tool MCP ghi thô
+    # — mọi đường ghi đều xuyên qua wrapper có cổng xác nhận. So sánh identity
+    # để chắc chắn object thô không lọt vào danh sách, kể cả khi trùng tên.
+    tools, _ = _recording_tools()
+    built = sawr._build_tools(tools)
+    raw_ids = {id(t) for t in tools}
+    assert all(id(t) not in raw_ids for t in built)
+    names = {t.name for t in built}
+    assert {"receive_order", "flag_order_for_review"} <= names  # wrapper thế chỗ đủ
+
+
+def test_build_tools_empty_mcp_exposes_no_write_wrappers():
+    # Degradation (spec §4.2, kế thừa eb61ade): thiếu tool MCP → không dựng
+    # wrapper tương ứng, chỉ còn đúng 2 tool an toàn.
+    names = {t.name for t in sawr._build_tools([])}
+    assert names == {"ask_human", "get_purchase_order_detail"}
