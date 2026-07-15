@@ -153,6 +153,8 @@ def test_build_graph_accepts_role_mapping(monkeypatch):
                          spy_llm_tools("mixed", graph_mod.make_fusion_node))
     monkeypatch.setattr(graph_mod, "make_respond_unknown_node",
                          spy_llm_only("respond_unknown", graph_mod.make_respond_unknown_node))
+    monkeypatch.setattr(graph_mod, "make_skill_extract_node",
+                         spy_llm_only("skill_extract", graph_mod.make_skill_extract_node))
 
     # Coordinators (create_order/create_rfq/.../inventory_adjust) receive
     # llms["planner"] too, via spec.build(llms["planner"], tools) in
@@ -183,6 +185,7 @@ def test_build_graph_accepts_role_mapping(monkeypatch):
     assert captured["create_order"] is llms["planner"]
     assert captured["create_rfq"] is llms["planner"]
     assert captured["inventory_adjust"] is llms["planner"]
+    assert captured["skill_extract"] is llms["planner"]
 
     # ...and critically NOT some other role's llm — this is what catches a
     # role-swap bug (e.g. llms["read"] accidentally wired to router/planner).
@@ -195,6 +198,7 @@ def test_build_graph_accepts_role_mapping(monkeypatch):
     assert captured["rag"] is not llms["fusion"]
     assert captured["mixed"] is not llms["synthesis"]
     assert captured["respond_unknown"] is not llms["router"]
+    assert captured["skill_extract"] is not llms["router"]
 
 
 def test_build_graph_registers_skill_nodes():
