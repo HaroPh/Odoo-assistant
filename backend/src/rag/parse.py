@@ -4,7 +4,14 @@ from docx import Document
 import openpyxl
 import pypdf
 
-_HEADING_RE = re.compile(r"^\s*(Chương|Mục|Điều)\b|^\s*\d+(\.\d+)*[\.\)]?\s+\S")
+# Nhánh số CHỈ nhận numbering đa cấp ("1.1", "3.2.1"), sub-level 1-2 chữ số:
+# numbering 1 cấp ("1. ...") là KHOẢN (nội dung) trong luật VN chứ không phải
+# heading, còn nhóm 3 chữ số là dấu phân cách nghìn ("5.000.000.000 đồng.")
+# hoặc mã HS phụ lục ("2931.9080") — cả ba từng bị nhận nhầm heading khiến
+# chunking nuốt nội dung (spec 2026-07-15-rag-heading-detection-fix).
+_HEADING_RE = re.compile(
+    r"^\s*(Chương|Mục|Điều)\b"
+    r"|^\s*\d+\.\d{1,2}(\.\d{1,2})*(?!\d)[\.\)]?\s+\S")
 
 
 def parse_docx(path: str) -> list[dict]:
