@@ -31,11 +31,6 @@ def test_route_after_extract_dispatches_to_matched_skill_node():
     assert route_after_skill_extract(state) == "skill_discount_quote"
 
 
-def test_route_after_extract_dispatches_warehouse_skill_node():
-    state = {"pending_action": {"tool": "skill:warehouse_receiving", "args": {}}}
-    assert route_after_skill_extract(state) == "skill_warehouse_receiving"
-
-
 def test_route_after_extract_ends_on_no_pending_action():
     assert route_after_skill_extract({"pending_action": None}) == END
 

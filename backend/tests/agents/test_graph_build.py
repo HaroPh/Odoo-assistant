@@ -204,14 +204,14 @@ def test_build_graph_accepts_role_mapping(monkeypatch):
 def test_build_graph_registers_skill_nodes():
     graph = build_graph(MagicMock(), tools=[], checkpointer=None)
     nodes = graph.get_graph().nodes
-    assert {"skill_extract", "skill_discount_quote", "skill_warehouse_receiving"} <= set(nodes)
+    assert {"skill_extract", "skill_discount_quote"} <= set(nodes)
+    assert "skill_warehouse_receiving" not in nodes  # removed from SKILLS this branch
 
 
 def test_skill_nodes_edge_straight_to_end():
     graph = build_graph(MagicMock(), tools=[], checkpointer=None)
     edges = [(e.source, e.target) for e in graph.get_graph().edges]
     assert ("skill_discount_quote", "__end__") in edges
-    assert ("skill_warehouse_receiving", "__end__") in edges
 
 
 def test_route_by_intent_ignores_skills_when_flag_off(monkeypatch):

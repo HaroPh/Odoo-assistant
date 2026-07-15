@@ -15,7 +15,7 @@ from langchain_core.messages import AIMessage
 from langgraph.graph import END
 
 from .nodes import _plan_json
-from . import skill_discount_quote, skill_warehouse_receiving
+from . import skill_discount_quote
 
 
 @dataclass(frozen=True)
@@ -31,9 +31,6 @@ SKILLS = {
     "discount_quote": SkillSpec(
         "skill_discount_quote", skill_discount_quote.TRIGGERS,
         skill_discount_quote.EXTRACT_PROMPT, skill_discount_quote.make_node),
-    "warehouse_receiving": SkillSpec(
-        "skill_warehouse_receiving", skill_warehouse_receiving.TRIGGERS,
-        skill_warehouse_receiving.EXTRACT_PROMPT, skill_warehouse_receiving.make_node),
 }
 
 
