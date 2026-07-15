@@ -29,7 +29,11 @@ QC_OPTIONS = [{"id": "pass", "name": "Đạt"}, {"id": "fail", "name": "Không �
 
 # Groups of exactly 3 digits after . or , are a Vietnamese thousand separator
 # ("1.000" = 1000); anything else after . or , is a decimal ("12,5" = 12.5).
-_NUM_RE = re.compile(r"\d{1,3}(?:[.,]\d{3})+(?!\d)|\d+(?:[.,]\d+)?")
+# The leading (?<![A-Za-z0-9]) negative look-behind stops a match from
+# starting mid-token, so digits embedded in an alphanumeric code (e.g. the
+# "00003" in "P00003") are skipped rather than mistaken for the standalone
+# quantity later in the reply (e.g. "P00003, thực nhận 45 cái" -> 45, not 3).
+_NUM_RE = re.compile(r"(?<![A-Za-z0-9])(?:\d{1,3}(?:[.,]\d{3})+(?!\d)|\d+(?:[.,]\d+)?)")
 _THOUSANDS_RE = re.compile(r"\d{1,3}(?:[.,]\d{3})+")
 
 

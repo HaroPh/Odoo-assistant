@@ -36,6 +36,16 @@ def test_parse_qty_non_string_returns_none():
     assert swr.parse_qty(None) is None
 
 
+def test_parse_qty_ignores_digits_inside_po_code_before_qty():
+    # PO code digits ("00003") must not be mistaken for the quantity that
+    # follows later in the same reply.
+    assert swr.parse_qty("đơn P00003 nhận 45") == 45.0
+
+
+def test_parse_qty_ignores_digits_inside_po_code_before_qty_with_comma():
+    assert swr.parse_qty("P00003, thực nhận 45 cái") == 45.0
+
+
 def _fake_tools(receive_ret=None, flag_ret=None):
     receive = MagicMock()
     receive.name = "receive_order"
