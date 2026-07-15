@@ -16,13 +16,19 @@ from .write_registry import WRITE_COORDINATORS, COORDINATED_TOOLS
 from .continuation import make_write_continuation_node, _route_after_continuation
 from .models import llms_from_single
 from .skills import SKILLS, match_skill, make_skill_extract_node, route_after_skill_extract
+from .skills import _fold
 from . import skill_gate
+from . import skill_agentic_warehouse_receiving
+from .skill_warehouse_receiving import TRIGGERS as _AGENTIC_WR_TRIGGERS
 
 
 def _route_by_intent(state: ERPAgentState) -> str:
     if skill_gate.skills_enabled():
         last_human = next((m.content for m in reversed(state["messages"])
                            if m.type == "human"), "")
+        folded = _fold(last_human)
+        if any(kw in folded for kw in _AGENTIC_WR_TRIGGERS):
+            return "skill_agentic_warehouse_receiving"
         if match_skill(last_human):
             return "skill_extract"
     return state.get("intent") or "unknown"
@@ -60,6 +66,9 @@ def build_graph(llm, tools, checkpointer) -> object:
     for spec in SKILLS.values():
         g.add_node(spec.node, spec.build(tools))
         g.add_edge(spec.node, END)
+    g.add_node("skill_agentic_warehouse_receiving",
+              skill_agentic_warehouse_receiving.make_node(llms["planner"], tools))
+    g.add_edge("skill_agentic_warehouse_receiving", END)
 
     g.set_entry_point("intent_router")
 
@@ -70,6 +79,7 @@ def build_graph(llm, tools, checkpointer) -> object:
         "mixed": "mixed",
         "unknown": "respond_unknown",
         "skill_extract": "skill_extract",
+        "skill_agentic_warehouse_receiving": "skill_agentic_warehouse_receiving",
     }
     g.add_conditional_edges("intent_router", _route_by_intent, intent_targets)
     skill_targets = {END: END}

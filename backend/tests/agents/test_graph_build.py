@@ -241,3 +241,74 @@ def test_route_by_intent_flag_on_but_no_trigger_falls_through(monkeypatch):
     state = {"messages": [HumanMessage(content="xác nhận đơn S00012")],
             "intent": "erp_write"}
     assert _route_by_intent(state) == "erp_write"
+
+
+def test_build_graph_registers_agentic_warehouse_receiving_node():
+    graph = build_graph(MagicMock(), tools=[], checkpointer=None)
+    assert "skill_agentic_warehouse_receiving" in graph.get_graph().nodes
+
+
+def test_agentic_node_edges_straight_to_end():
+    graph = build_graph(MagicMock(), tools=[], checkpointer=None)
+    edges = [(e.source, e.target) for e in graph.get_graph().edges]
+    assert ("skill_agentic_warehouse_receiving", "__end__") in edges
+
+
+def test_route_by_intent_routes_agentic_trigger_to_agentic_node(monkeypatch):
+    from backend.src.agents.graph import _route_by_intent
+    from backend.src.agents import skill_gate
+    monkeypatch.setattr(skill_gate, "skills_enabled", lambda: True)
+    state = {"messages": [HumanMessage(content="quy trình nhập kho cho P00003")],
+            "intent": "erp_write"}
+    assert _route_by_intent(state) == "skill_agentic_warehouse_receiving"
+
+
+def test_route_by_intent_agentic_trigger_diacritic_insensitive(monkeypatch):
+    from backend.src.agents.graph import _route_by_intent
+    from backend.src.agents import skill_gate
+    monkeypatch.setattr(skill_gate, "skills_enabled", lambda: True)
+    state = {"messages": [HumanMessage(content="quy trinh nhap kho cho P00003")],
+            "intent": "erp_write"}
+    assert _route_by_intent(state) == "skill_agentic_warehouse_receiving"
+
+
+def test_route_by_intent_agentic_trigger_ignored_when_flag_off(monkeypatch):
+    from backend.src.agents.graph import _route_by_intent
+    from backend.src.agents import skill_gate
+    monkeypatch.setattr(skill_gate, "skills_enabled", lambda: False)
+    state = {"messages": [HumanMessage(content="quy trình nhập kho cho P00003")],
+            "intent": "erp_write"}
+    assert _route_by_intent(state) == "erp_write"
+
+
+def test_route_by_intent_discount_quote_still_goes_through_skill_extract(monkeypatch):
+    # Regression guard: the new agentic-specific check must not shadow the
+    # unrelated discount_quote trigger, which still goes through the
+    # generic SKILLS/skill_extract path (Task 1 only removed
+    # warehouse_receiving from SKILLS, not discount_quote).
+    from backend.src.agents.graph import _route_by_intent
+    from backend.src.agents import skill_gate
+    monkeypatch.setattr(skill_gate, "skills_enabled", lambda: True)
+    state = {"messages": [HumanMessage(content="báo giá chiết khấu cho Azur")],
+            "intent": "erp_write"}
+    assert _route_by_intent(state) == "skill_extract"
+
+
+def test_build_graph_agentic_node_uses_planner_role(monkeypatch):
+    # Same role-wiring regression pattern as test_build_graph_accepts_role_mapping
+    # (that test's own coverage for skill_extract, added in the pilot's
+    # Task 6 fix round) — extended here for the agentic node's own llm param.
+    import backend.src.agents.graph as graph_mod
+    from backend.src.agents.models import ROLES
+    llms = {r: MagicMock(name=r) for r in ROLES}
+    captured = {}
+    real = graph_mod.skill_agentic_warehouse_receiving.make_node
+
+    def _spy(llm, mcp_tools):
+        captured["skill_agentic_warehouse_receiving"] = llm
+        return real(llm, mcp_tools)
+
+    monkeypatch.setattr(graph_mod.skill_agentic_warehouse_receiving, "make_node", _spy)
+    graph_mod.build_graph(llms, tools=[], checkpointer=None)
+    assert captured["skill_agentic_warehouse_receiving"] is llms["planner"]
+    assert captured["skill_agentic_warehouse_receiving"] is not llms["router"]
