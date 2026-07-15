@@ -104,9 +104,7 @@ async def test_match_scenario_receives(monkeypatch):
         AIMessage(content="", tool_calls=[
             {"name": "ask_human", "args": {"question": "QC kết quả?"}, "id": "c3"}]),
         AIMessage(content="", tool_calls=[
-            {"name": "ask_human", "args": {"question": "Xác nhận nhận hàng?"}, "id": "c4"}]),
-        AIMessage(content="", tool_calls=[
-            {"name": "receive_order", "args": {"order_ref": "P00003"}, "id": "c5"}]),
+            {"name": "receive_order", "args": {"order_ref": "P00003"}, "id": "c4"}]),
         AIMessage(content="Đã nhận hàng xong."),
     ]
     node = sawr.make_node(_SeqModel(steps), _MCP_TOOLS)
@@ -121,9 +119,11 @@ async def test_match_scenario_receives(monkeypatch):
     assert "QC" in res["__interrupt__"][0].value["question"]
 
     res = await graph.ainvoke(Command(resume="đạt"), cfg)
-    assert "__interrupt__" in res  # final confirm-before-write checkpoint
+    payload = res["__interrupt__"][0].value  # cổng xác nhận code-enforced
+    assert payload["kind"] == "confirm"
+    assert "P00003" in payload["question"]
 
-    res = await graph.ainvoke(Command(resume="có"), cfg)
+    res = await graph.ainvoke(Command(resume=True), cfg)
     assert "__interrupt__" not in res
     tool_texts = [m.content for m in res["messages"] if m.type == "tool"]
     assert any("Đã nhận hàng" in t for t in tool_texts)
@@ -140,7 +140,7 @@ async def test_short_scenario_flags_not_receives(monkeypatch):
             {"name": "get_purchase_order_detail", "args": {"ref": "P00003"}, "id": "c2"}]),
         AIMessage(content="", tool_calls=[
             {"name": "flag_order_for_review",
-             "args": {"model": "purchase.order", "order_ref": "P00003",
+             "args": {"order_ref": "P00003",
                      "note": "Thiếu hàng: nhận 7, PO 10."}, "id": "c3"}]),
         AIMessage(content="Đã ghi nhận thiếu hàng, chờ xử lý."),
     ]
@@ -150,7 +150,9 @@ async def test_short_scenario_flags_not_receives(monkeypatch):
 
     await graph.ainvoke({"messages": [HumanMessage(content="nhập kho P00003")]}, cfg)
     res = await graph.ainvoke(Command(resume="7"), cfg)
+    assert res["__interrupt__"][0].value["kind"] == "confirm"  # cổng ghi chú
 
+    res = await graph.ainvoke(Command(resume=True), cfg)
     assert "__interrupt__" not in res
     tool_names_called = [tc["name"] for m in res["messages"] if m.type == "ai"
                          for tc in (m.tool_calls or [])]
@@ -169,7 +171,7 @@ async def test_excess_scenario_flags_not_receives(monkeypatch):
             {"name": "get_purchase_order_detail", "args": {"ref": "P00003"}, "id": "c2"}]),
         AIMessage(content="", tool_calls=[
             {"name": "flag_order_for_review",
-             "args": {"model": "purchase.order", "order_ref": "P00003",
+             "args": {"order_ref": "P00003",
                      "note": "Thừa hàng: nhận 15, PO 10."}, "id": "c3"}]),
         AIMessage(content="Đã ghi nhận nhận thừa."),
     ]
@@ -179,7 +181,9 @@ async def test_excess_scenario_flags_not_receives(monkeypatch):
 
     await graph.ainvoke({"messages": [HumanMessage(content="nhập kho P00003")]}, cfg)
     res = await graph.ainvoke(Command(resume="15"), cfg)
+    assert res["__interrupt__"][0].value["kind"] == "confirm"  # cổng ghi chú
 
+    res = await graph.ainvoke(Command(resume=True), cfg)
     assert "__interrupt__" not in res
     tool_names_called = [tc["name"] for m in res["messages"] if m.type == "ai"
                          for tc in (m.tool_calls or [])]
@@ -254,3 +258,73 @@ def test_make_node_does_not_crash_with_empty_mcp_tools():
     # just this one skill. Must build cleanly with fewer tools instead.
     node = sawr.make_node(_SeqModel([AIMessage(content="ok")]), [])
     assert node is not None
+
+
+def _recording_tools():
+    """2 fake tool ghi MCP có ghi nhận lệnh gọi — để assert wrapper chỉ gọi
+    tool thật SAU resume=True, đúng 1 lần, đúng args."""
+    calls = {"receive": [], "flag": []}
+
+    @tool("receive_order")
+    def rec_receive(order_ref: str) -> str:
+        """Fake receive_order MCP tool (recording)."""
+        calls["receive"].append({"order_ref": order_ref})
+        return json.dumps({"ok": True,
+                           "display": f"Đã nhận hàng cho đơn mua {order_ref}."},
+                          ensure_ascii=False)
+
+    @tool("flag_order_for_review")
+    def rec_flag(model: str, order_ref: str, note: str) -> str:
+        """Fake flag_order_for_review MCP tool (recording)."""
+        calls["flag"].append({"model": model, "order_ref": order_ref, "note": note})
+        return json.dumps({"ok": True,
+                           "display": f"Đã ghi chú nội bộ trên đơn {order_ref}."},
+                          ensure_ascii=False)
+
+    return [rec_receive, rec_flag], calls
+
+
+@pytest.mark.asyncio
+async def test_confirm_gate_parks_before_write_then_writes_once_on_yes():
+    tools, calls = _recording_tools()
+    steps = [
+        AIMessage(content="", tool_calls=[
+            {"name": "receive_order", "args": {"order_ref": "P00021"}, "id": "g1"}]),
+        AIMessage(content="Đã nhận hàng xong."),
+    ]
+    graph = _graph(sawr.make_node(_SeqModel(steps), tools))
+    cfg = _cfg("g1")
+
+    res = await graph.ainvoke({"messages": [HumanMessage(content="nhập kho P00021")]}, cfg)
+    payload = res["__interrupt__"][0].value
+    assert payload["kind"] == "confirm"
+    assert "P00021" in payload["question"]
+    assert "expires_at" in payload
+    assert calls["receive"] == []  # bất biến: KHÔNG ghi trước khi có YES
+
+    res = await graph.ainvoke(Command(resume=True), cfg)
+    assert "__interrupt__" not in res
+    assert calls["receive"] == [{"order_ref": "P00021"}]  # đúng 1 lần, đúng args
+    tool_texts = [m.content for m in res["messages"] if m.type == "tool"]
+    assert any("Đã nhận hàng" in t for t in tool_texts)
+
+
+@pytest.mark.asyncio
+async def test_confirm_gate_refusal_blocks_write():
+    tools, calls = _recording_tools()
+    steps = [
+        AIMessage(content="", tool_calls=[
+            {"name": "receive_order", "args": {"order_ref": "P00021"}, "id": "g2"}]),
+        AIMessage(content="Đã hủy theo yêu cầu."),
+    ]
+    graph = _graph(sawr.make_node(_SeqModel(steps), tools))
+    cfg = _cfg("g2")
+
+    await graph.ainvoke({"messages": [HumanMessage(content="nhập kho P00021")]}, cfg)
+    res = await graph.ainvoke(Command(resume=False), cfg)
+
+    assert "__interrupt__" not in res
+    assert calls["receive"] == []  # từ chối → 0 write
+    tool_texts = [m.content for m in res["messages"] if m.type == "tool"]
+    assert any(sawr.REFUSED_MSG in t for t in tool_texts)
+    assert res["messages"][-1].type == "ai"  # model vẫn chốt được câu trả lời
