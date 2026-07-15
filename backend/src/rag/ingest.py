@@ -8,7 +8,7 @@ from . import db as _db
 from .config import RAG_SCHEMA
 from .embed import EmbeddingError, embed_texts
 from .parse import parse_docx, parse_pdf, parse_xlsx
-from .chunking import chunk_text_blocks, chunk_xlsx_sheets
+from .chunking import chunk_text_blocks, chunk_xlsx_sheets, index_text
 
 _EXT = {".pdf": "text", ".docx": "text", ".xlsx": "xlsx"}
 
@@ -59,7 +59,11 @@ def _ingest_file(path: str, conn) -> dict:
         return {"ingested": 0, "skipped": 1, "chunks": 0}
 
     # Embed BEFORE any DB write — if Ollama is down no orphan rows are created
-    vectors = embed_texts([c["chunk_text"] for c in chunks])
+    # Embed/ts_vector trên crumb + body (index_text) — tìm được theo heading
+    # ("Điều 124") dù nó chỉ nằm trong section_path; chunk_text lưu DB vẫn
+    # body-only (spec 2026-07-15 §3C).
+    vectors = embed_texts([index_text(c["section_path"], c["chunk_text"])
+                           for c in chunks])
 
     with conn.transaction():
         if existing:
@@ -76,7 +80,8 @@ def _ingest_file(path: str, conn) -> dict:
                 "to_tsvector('simple', %s))",
                 (c["doc_id"], c["source_file"], c["doc_title"], c["section_path"], c["page"],
                  c["sheet"], c["row_range"], c["columns"], c["chunk_index"], c["token_count"],
-                 c["chunk_text"], vec, segment_vi(c["chunk_text"])),
+                 c["chunk_text"], vec,
+                 segment_vi(index_text(c["section_path"], c["chunk_text"]))),
             )
     return {"ingested": 1, "skipped": 0, "chunks": len(chunks)}
 

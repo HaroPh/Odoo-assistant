@@ -105,3 +105,23 @@ def test_rerank_fail_open_keeps_rrf_order(clean_tables, monkeypatch):
     assert res.chunks[0].doc_id == "A"          # nguyên trạng thứ tự RRF
     assert res.chunks[0].rerank_score is None
     assert res.top_score == res.chunks[0].rrf_score
+
+
+def test_rerank_pairs_include_section_path(clean_tables, monkeypatch):
+    # Spec 2026-07-15 §3C: tầng nào chấm điểm phải thấy đúng chuỗi đã index —
+    # nếu reranker chỉ thấy body, chunk match nhờ crumb sẽ bị dìm xuống.
+    from backend.src.rag import retrieve as r
+    _seed(clean_tables, [
+        ("A", "Khách hàng hoàn hàng trong 30 ngày", [1.0] + [0.0] * 1023),
+    ])
+    monkeypatch.setattr(r, "embed_query", lambda q: [1.0] + [0.0] * 1023)
+    seen = []
+
+    def _capture(q, texts):
+        seen.extend(texts)
+        return [0.5 for _ in texts]
+
+    monkeypatch.setattr(r.reranker, "score_pairs", _capture)
+    r.retrieve("hoàn hàng", k=5, conn=clean_tables)
+    # _seed chèn section_path="A › B" → pair = crumb + body
+    assert seen == ["A › B Khách hàng hoàn hàng trong 30 ngày"]

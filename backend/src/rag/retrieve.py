@@ -5,6 +5,7 @@ from . import reranker
 from .config import TOP_N, TOP_K, RRF_K, RAG_SCHEMA
 from .embed import embed_query
 from .ingest import segment_vi
+from .chunking import index_text
 from .types import Chunk, RetrievalResult
 
 _COLS = ("id, doc_id, source_file, doc_title, section_path, page, sheet, row_range, chunk_text")
@@ -51,7 +52,10 @@ def rerank(query: str, chunks: list[Chunk]) -> tuple[list[Chunk], bool]:
     điểm bằng nhau giữ nguyên thứ tự RRF."""
     if not chunks:
         return chunks, False
-    scores = reranker.score_pairs(query, [c.text for c in chunks])
+    # Pair = đúng chuỗi đã index (crumb + body) — nếu chỉ đưa body, chunk
+    # match nhờ crumb sẽ bị cross-encoder dìm (spec 2026-07-15 §3C).
+    scores = reranker.score_pairs(query, [index_text(c.section_path, c.text)
+                                          for c in chunks])
     if scores is None:
         return chunks, False
     order = sorted(range(len(chunks)), key=lambda i: scores[i], reverse=True)

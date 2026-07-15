@@ -103,3 +103,40 @@ def test_ingest_rolls_back_doc_on_embed_failure(clean_tables, monkeypatch, tmp_p
     # no orphan doc row, no chunks
     assert clean_tables.execute("SELECT count(*) FROM rag_documents").fetchone()[0] == 0
     assert clean_tables.execute("SELECT count(*) FROM rag_chunks").fetchone()[0] == 0
+
+
+def test_ingest_indexes_section_path_but_keeps_chunk_text_body_only(
+        clean_tables, monkeypatch, tmp_path):
+    # Spec 2026-07-15 §3C: crumb vào chuỗi embed + ts_vector để tìm được theo
+    # số Điều; cột chunk_text giữ body-only (hiển thị/citation nguyên trạng).
+    from backend.src.rag import ingest as ing
+    captured = []
+
+    def _capture(texts):
+        captured.extend(texts)
+        return [[0.01] * 1024 for _ in texts]
+
+    monkeypatch.setattr(ing, "embed_texts", _capture)
+
+    from docx import Document
+    p = str(tmp_path / "law.docx")
+    d = Document()
+    d.add_heading("Điều 99. Quy định đặc thù", level=1)
+    d.add_paragraph("1. Nội dung khoản một về nghĩa vụ.")
+    d.save(p)
+    ing.ingest_path(p, conn=clean_tables)
+
+    # Chuỗi embed chứa crumb
+    assert any("Điều 99" in t for t in captured)
+    # chunk_text trong DB vẫn body-only
+    texts = [r[0] for r in clean_tables.execute(
+        "SELECT chunk_text FROM rag_chunks").fetchall()]
+    assert any("khoản một" in t for t in texts)
+    assert all("Điều 99" not in t for t in texts)
+    # ts_vector chứa token của crumb (cùng transform segment_vi hai phía)
+    from backend.src.rag.ingest import segment_vi
+    n = clean_tables.execute(
+        "SELECT count(*) FROM rag_chunks "
+        "WHERE ts_vector @@ plainto_tsquery('simple', %s)",
+        (segment_vi("Điều 99"),)).fetchone()[0]
+    assert n >= 1
