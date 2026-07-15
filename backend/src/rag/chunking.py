@@ -39,6 +39,14 @@ def _split_section_text(text: str) -> list[str]:
     return chunks or ([text.strip()] if text.strip() else [])
 
 
+def index_text(section_path: str | None, chunk_text: str) -> str:
+    """Chuỗi để embed/ts_vector/rerank — crumb + body, cho phép tìm theo
+    heading (vd 'Điều 124'). chunk_text lưu DB giữ nguyên body-only
+    (hiển thị/citation không đổi). Dùng ở đúng 3 nơi: ingest (embedding,
+    ts_vector) và retrieve (rerank pairs) — spec 2026-07-15 §3C."""
+    return " ".join(x for x in (section_path, chunk_text) if x)
+
+
 def chunk_text_blocks(blocks: list[dict], *, doc_id: str, source_file: str) -> list[dict]:
     """Structure-aware: group body under its heading path, chunk within a leaf section only."""
     doc_title = next((b["text"] for b in blocks if b["heading_level"]), source_file)
@@ -55,9 +63,19 @@ def chunk_text_blocks(blocks: list[dict], *, doc_id: str, source_file: str) -> l
 
     for b in blocks:
         if b["heading_level"]:
+            lvl = b["heading_level"]
+            if not cur_body and path_stack and path_stack[-1][0] >= lvl:
+                # Heading trước chưa có body mà đã bị heading cùng/cao cấp
+                # ghi đè — dấu hiệu heading-detection sai (vd khoản luật bị
+                # nhận nhầm) hoặc chuỗi tiêu đề sát nhau (Chương → tiêu đề IN
+                # HOA). Giữ làm body: không bao giờ mất nội dung âm thầm
+                # (spec 2026-07-15 §3B).
+                if cur_page is None:
+                    cur_page = b["page"]
+                cur_body.append(b["text"])
+                continue
             _flush()
             cur_body.clear()
-            lvl = b["heading_level"]
             while path_stack and path_stack[-1][0] >= lvl:
                 path_stack.pop()
             path_stack.append((lvl, b["text"]))

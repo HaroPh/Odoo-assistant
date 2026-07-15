@@ -45,3 +45,41 @@ def test_chunk_text_builds_section_path_and_does_not_straddle(policy_docx):
     # chunk_index is sequential from 0
     assert [c["chunk_index"] for c in chunks] == list(range(len(chunks)))
     assert all(c["token_count"] > 0 for c in chunks)
+
+
+def test_consecutive_same_level_headings_do_not_lose_content():
+    # Bug 2026-07-15: 2 heading cùng cấp liên tiếp không body ở giữa → heading
+    # trước bị pop mất, text heading sau chỉ còn trong section_path (không
+    # được index). Guard mới: block heading thứ hai được giữ làm BODY.
+    from backend.src.rag.chunking import chunk_text_blocks
+    blocks = [
+        {"text": "Điều 124. Trường hợp bị cưỡng chế", "heading_level": 2, "page": 64},
+        {"text": "1. Người nộp thuế có tiền thuế nợ quá 90 ngày.", "heading_level": 2, "page": 64},
+        {"text": "2. Người nộp thuế có tiền thuế nợ khi hết thời hạn gia hạn.", "heading_level": None, "page": 64},
+    ]
+    chunks = chunk_text_blocks(blocks, doc_id="d", source_file="f.pdf")
+    bodies = " ".join(c["chunk_text"] for c in chunks)
+    crumbs = " ".join(c["section_path"] for c in chunks)
+    assert "quá 90 ngày" in bodies                    # khoản nằm trong chunk_text
+    assert "Điều 124" in crumbs                       # heading thật giữ vai trò crumb
+
+
+def test_two_headings_only_document_keeps_both_texts():
+    # Trước fix: cả hai text biến mất (0 chunk). Sau fix: 1 chunk, text sau
+    # là body, text trước là crumb — bất biến "không mất nội dung âm thầm".
+    from backend.src.rag.chunking import chunk_text_blocks
+    blocks = [
+        {"text": "Chương I", "heading_level": 2, "page": 1},
+        {"text": "NHỮNG QUY ĐỊNH CHUNG", "heading_level": 2, "page": 1},
+    ]
+    chunks = chunk_text_blocks(blocks, doc_id="d", source_file="f.pdf")
+    assert len(chunks) == 1
+    assert chunks[0]["chunk_text"] == "NHỮNG QUY ĐỊNH CHUNG"
+    assert "Chương I" in chunks[0]["section_path"]
+
+
+def test_index_text_composes_crumb_and_body():
+    from backend.src.rag.chunking import index_text
+    assert index_text("Điều 1. Phạm vi", "Nội dung khoản.") == "Điều 1. Phạm vi Nội dung khoản."
+    assert index_text(None, "Chỉ có body.") == "Chỉ có body."
+    assert index_text("", "Body.") == "Body."
