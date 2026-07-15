@@ -23,7 +23,7 @@ UNCLEAR = "unclear"
 # Conservative keyword sets. These fire only when exactly one side matches;
 # mixed or empty signals fall through to UNCLEAR (and then the LLM).
 _CONFIRM_WORDS = {
-    "có", "co", "yes", "y", "ya", "yeah", "yep", "ừ", "u", "uh", "ừm", "um",
+    "có", "co", "yes", "y", "ya", "yeah", "yep", "ừ", "u", "uh",
     "ok", "oke", "okay", "okie", "đúng", "dung", "chuẩn", "chuan", "confirm",
     "đồng ý", "dong y", "xác nhận", "xac nhan", "làm đi", "lam di",
     "tiến hành", "tien hanh", "đồng ý luôn",
