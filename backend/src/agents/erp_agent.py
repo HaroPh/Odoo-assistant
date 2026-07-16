@@ -8,6 +8,7 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.types import Command
+from langgraph.errors import GraphRecursionError
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
@@ -21,6 +22,9 @@ PG_CONN      = os.environ.get(
     "DATABASE_URL",
     "postgresql://admin:changeme@localhost:5433/ai_assistant",
 )
+RECURSION_MSG = ("Yêu cầu này chạy quá số bước xử lý cho phép nên đã được "
+                 "dừng an toàn. Nếu bạn vừa yêu cầu một thao tác ghi, hãy "
+                 "kiểm tra lại trạng thái đơn trước khi thử lại.")
 
 
 def _question_from_interrupts(interrupts) -> str | None:
@@ -163,32 +167,39 @@ class ERPAgent:
 
         is_fresh = (reset_if_fresh and thread_id is not None
                     and len(messages) == 1 and messages[0].get("role") == "user")
-        if is_fresh:
-            await self._checkpointer.adelete_thread(tid)
-            result = await self._invoke_fresh(messages, config)
-        else:
-            # If the thread is parked at a write-confirmation interrupt, this
-            # turn is the user's answer — classify it and resume instead of
-            # starting over.
-            snapshot = await self.graph.aget_state(config)
-            if _is_parked(snapshot):
-                expires_at = _pending_expiry(snapshot)
-                if expires_at is not None and time.time() > expires_at:
-                    # Stale confirmation: discard it (resume=False is a no-op
-                    # write, result ignored) and process this turn as fresh.
-                    await self.graph.ainvoke(Command(resume=False), config=config)
-                    result = await self._invoke_fresh(messages, config)
-                else:
-                    reply = messages[-1]["content"]
-                    decision = await _decide_resume(
-                        _pending_kind(snapshot), _pending_options(snapshot),
-                        _pending_question(snapshot), reply, self._llms["evaluator"])
-                    if isinstance(decision, str):
-                        # Unclear reply: re-ask, leave the thread parked.
-                        return decision
-                    result = await self.graph.ainvoke(decision, config=config)
-            else:
+        try:
+            if is_fresh:
+                await self._checkpointer.adelete_thread(tid)
                 result = await self._invoke_fresh(messages, config)
+            else:
+                # If the thread is parked at a write-confirmation interrupt, this
+                # turn is the user's answer — classify it and resume instead of
+                # starting over.
+                snapshot = await self.graph.aget_state(config)
+                if _is_parked(snapshot):
+                    expires_at = _pending_expiry(snapshot)
+                    if expires_at is not None and time.time() > expires_at:
+                        # Stale confirmation: discard it (resume=False is a no-op
+                        # write, result ignored) and process this turn as fresh.
+                        await self.graph.ainvoke(Command(resume=False), config=config)
+                        result = await self._invoke_fresh(messages, config)
+                    else:
+                        reply = messages[-1]["content"]
+                        decision = await _decide_resume(
+                            _pending_kind(snapshot), _pending_options(snapshot),
+                            _pending_question(snapshot), reply, self._llms["evaluator"])
+                        if isinstance(decision, str):
+                            # Unclear reply: re-ask, leave the thread parked.
+                            return decision
+                        result = await self.graph.ainvoke(decision, config=config)
+                else:
+                    result = await self._invoke_fresh(messages, config)
+        except GraphRecursionError:
+            # Spike v10b 2026-07-16: subgraph-as-node KHÔNG bị chặn bởi
+            # default 25 — trần thật đến từ with_config tại graph wiring.
+            # Chạm trần (agentic skill loop, hoặc erp_read tự loop) → câu
+            # trả lời lịch sự thay vì rơi vào catch-all generic của main.py.
+            return RECURSION_MSG
 
         # A write planner that called interrupt() surfaces as "__interrupt__" with
         # no final AI message — return its confirmation question to the user.

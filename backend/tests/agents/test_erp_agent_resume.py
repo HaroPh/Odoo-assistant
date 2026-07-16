@@ -54,3 +54,26 @@ async def test_next_action_kind_unchanged():
     options = [{"id": True, "name": "Giao hàng"}, {"id": False, "name": "Dừng"}]
     result = await _decide_resume("next_action", options, "Tiếp?", "1", llm=None)
     assert isinstance(result, Command) and result.resume is True
+
+
+@pytest.mark.asyncio
+async def test_chat_returns_polite_message_on_graph_recursion_error():
+    # Trước fix: GraphRecursionError xuyên lên catch-all của main.py → câu
+    # lỗi generic. Sau fix: erp_agent.chat bắt riêng → RECURSION_MSG trung
+    # thực (không khẳng định "chưa ghi gì" — write có thể đã xảy ra qua
+    # cổng xác nhận trước khi loop).
+    from types import SimpleNamespace
+    from langgraph.errors import GraphRecursionError
+    from backend.src.agents.erp_agent import ERPAgent, RECURSION_MSG
+
+    class _RecursionGraph:
+        async def aget_state(self, config):
+            return SimpleNamespace(tasks=(), next=())
+
+        async def ainvoke(self, *a, **k):
+            raise GraphRecursionError("loop")
+
+    agent = ERPAgent()
+    agent.graph = _RecursionGraph()
+    out = await agent.chat([{"role": "user", "content": "nhập kho P00021"}])
+    assert out == RECURSION_MSG
