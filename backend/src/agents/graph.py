@@ -21,21 +21,44 @@ from . import skill_gate
 from .agentic_registry import AGENTIC_SKILLS
 
 
+_QUESTION_MARKERS = (
+    "?", "la gi", "nghia la", "nhu the nao", "the nao", "tai sao",
+    "giai thich", "huong dan", "kiem tra", "tinh trang", "trang thai",
+    "duoc khong",
+)
+
+
+def _looks_like_question(folded: str) -> bool:
+    return any(m in folded for m in _QUESTION_MARKERS)
+
+
 def _route_by_intent(state: ERPAgentState) -> str:
-    # Intent-gate: skill trigger chỉ được cướp luồng khi router đã phân loại
-    # erp_write. Thiếu gate này, câu HỎI chứa cụm trigger bị hijack vào
-    # THỰC THI SOP ("quy trình nhập kho là gì?" → skill thay vì RAG) — lý do
-    # ERP_SKILLS_ENABLED từng phải default-off. False-negative degrade mềm:
-    # router phân loại sai thì rơi về tầng 1, nơi cùng tool vẫn xử lý được.
-    if skill_gate.skills_enabled() and state.get("intent") == "erp_write":
+    # Intent-gate: skill trigger chỉ được cướp luồng khi câu KHÔNG mang dấu
+    # hiệu câu hỏi — kiểm tra tất định (_looks_like_question), KHÔNG đơn
+    # thuần tin router. Router chỉ được dùng làm lối tắt bổ sung (OR) khi nó
+    # tự tin nói erp_write, không phải điều kiện bắt buộc.
+    #
+    # Lịch sử: bản đầu (chỉ AND với intent=="erp_write") đóng đúng ca hijack
+    # gốc ("quy trình nhập kho là gì?" → skill thay vì RAG) nhưng live-verify
+    # 2026-07-16 lộ ra chiều lỗi ngược — router phân loại "mixed"/"erp_read"
+    # cho chính 2 câu lệnh dùng nguyên văn TRIGGERS ("quy trình nhập kho cho
+    # đơn mua P00021", "nhập kho theo quy trình cho đơn mua P00021"), khiến
+    # lệnh thật bị lỡ route 3/3 lần thử — vì router chưa từng được tune để
+    # phân biệt "hỏi về SOP" khỏi "thực thi SOP cho 1 đơn cụ thể" (đọc rất
+    # giống định nghĩa "mixed" trong prompts.py dù ý người dùng là hành
+    # động). Chuyển gate sang tất định (đánh dấu câu hỏi) giữ nguyên bất
+    # biến an toàn (câu hỏi không hijack) mà không phụ thuộc phân loại LLM
+    # cho quyết định này.
+    if skill_gate.skills_enabled():
         last_human = next((m.content for m in reversed(state["messages"])
                            if m.type == "human"), "")
         folded = _fold(last_human)
-        for spec in AGENTIC_SKILLS.values():
-            if any(kw in folded for kw in spec.triggers):
-                return spec.node
-        if match_skill(last_human):
-            return "skill_extract"
+        if state.get("intent") == "erp_write" or not _looks_like_question(folded):
+            for spec in AGENTIC_SKILLS.values():
+                if any(kw in folded for kw in spec.triggers):
+                    return spec.node
+            if match_skill(last_human):
+                return "skill_extract"
     return state.get("intent") or "unknown"
 
 

@@ -418,3 +418,94 @@ def test_route_by_intent_discount_trigger_with_rag_intent_not_hijacked(monkeypat
                 content="chính sách báo giá chiết khấu như thế nào?")],
             "intent": "rag"}
     assert _route_by_intent(state) == "rag"
+
+
+# ── Regression: live-verify 2026-07-16 found the AND-only gate (intent ==
+# "erp_write") caused the MIRROR-IMAGE bug — real commands using the skill's
+# own literal TRIGGERS phrases got misrouted away from the skill because the
+# router classified them "mixed"/"erp_read" (ambiguous under prompts.py's
+# own "mixed" definition, which the router was never tuned to disambiguate
+# from an execute-SOP-for-order-X command). Fixed by switching to an OR:
+# erp_write OR "does not look like a question" (deterministic marker check,
+# _looks_like_question). These tests reproduce the exact 3 failing repro
+# phrasings with the WRONG intent attached, and assert routing now succeeds
+# regardless of router classification. ──────────────────────────────────
+
+def test_looks_like_question_detects_all_markers():
+    from backend.src.agents.graph import _looks_like_question
+    from backend.src.agents.skills import _fold
+    questions = [
+        "quy trình nhập kho là gì?",
+        "kiểm tra tình trạng giao hàng theo đơn S00074",
+        "chính sách báo giá chiết khấu như thế nào?",
+        "quy trình nhập kho nghĩa là gì",
+        "tại sao phải làm quy trình nhập kho",
+        "giải thích quy trình nhập kho giúp tôi",
+        "hướng dẫn quy trình nhập kho",
+        "trạng thái đơn mua P00021 thế nào",
+        "đơn này có xác nhận được không",
+    ]
+    for q in questions:
+        assert _looks_like_question(_fold(q)), q
+
+
+def test_looks_like_question_false_for_plain_commands():
+    from backend.src.agents.graph import _looks_like_question
+    from backend.src.agents.skills import _fold
+    commands = [
+        "làm quy trình nhập kho cho đơn mua P00021",
+        "nhập kho theo quy trình cho đơn mua P00021",
+        "quy trình nhập kho cho đơn mua P00021",
+        "giao hàng cho đơn bán S00012",
+        "báo giá chiết khấu cho Cửa hàng ABC, 5 Tủ gỗ",
+    ]
+    for c in commands:
+        assert not _looks_like_question(_fold(c)), c
+
+
+def test_route_by_intent_warehouse_command_routes_despite_mixed_intent(monkeypatch):
+    # Repro of live-verify failure #1: router classified this exact command
+    # as "mixed" (procedure + specific order, per prompts.py's own
+    # definition) instead of "erp_write" — the AND-only gate silently ate
+    # the command. Must now route to the skill regardless.
+    from backend.src.agents.graph import _route_by_intent
+    from backend.src.agents import skill_gate
+    monkeypatch.setattr(skill_gate, "skills_enabled", lambda: True)
+    state = {"messages": [HumanMessage(
+                content="làm quy trình nhập kho cho đơn mua P00021")],
+            "intent": "mixed"}
+    assert _route_by_intent(state) == "skill_agentic_warehouse_receiving"
+
+
+def test_route_by_intent_warehouse_command_routes_despite_erp_read_intent(monkeypatch):
+    # Repro of live-verify failure #2 (the worst one): router classified
+    # this command — using the skill's own literal TRIGGERS phrase verbatim
+    # — as "erp_read", producing an unrelated purchase-order summary
+    # instead of ever reaching the skill.
+    from backend.src.agents.graph import _route_by_intent
+    from backend.src.agents import skill_gate
+    monkeypatch.setattr(skill_gate, "skills_enabled", lambda: True)
+    state = {"messages": [HumanMessage(
+                content="nhập kho theo quy trình cho đơn mua P00021")],
+            "intent": "erp_read"}
+    assert _route_by_intent(state) == "skill_agentic_warehouse_receiving"
+
+
+def test_route_by_intent_delivery_command_routes_despite_wrong_intent(monkeypatch):
+    # Same fix, mirrored for the delivery skill.
+    from backend.src.agents.graph import _route_by_intent
+    from backend.src.agents import skill_gate
+    monkeypatch.setattr(skill_gate, "skills_enabled", lambda: True)
+    state = {"messages": [HumanMessage(content="giao hàng cho đơn bán S00012")],
+            "intent": "mixed"}
+    assert _route_by_intent(state) == "skill_agentic_delivery"
+
+
+def test_route_by_intent_discount_command_routes_despite_wrong_intent(monkeypatch):
+    from backend.src.agents.graph import _route_by_intent
+    from backend.src.agents import skill_gate
+    monkeypatch.setattr(skill_gate, "skills_enabled", lambda: True)
+    state = {"messages": [HumanMessage(
+                content="báo giá chiết khấu cho Cửa hàng ABC, 5 Tủ gỗ")],
+            "intent": "erp_read"}
+    assert _route_by_intent(state) == "skill_extract"
