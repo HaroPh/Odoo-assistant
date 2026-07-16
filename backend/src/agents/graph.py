@@ -18,7 +18,8 @@ from .models import llms_from_single
 from .skills import SKILLS, match_skill, make_skill_extract_node, route_after_skill_extract
 from .skills import _fold
 from . import skill_gate
-from .agentic_registry import AGENTIC_SKILLS
+from .agentic_registry import AGENTIC_SKILLS, AGENTIC_RECURSION_LIMIT
+from .agentic_context_sync import make_agentic_context_sync_node
 
 
 _QUESTION_MARKERS = (
@@ -49,6 +50,9 @@ def _route_by_intent(state: ERPAgentState) -> str:
     # động). Chuyển gate sang tất định (đánh dấu câu hỏi) giữ nguyên bất
     # biến an toàn (câu hỏi không hijack) mà không phụ thuộc phân loại LLM
     # cho quyết định này.
+    #
+    # Lưới đỡ cuối không phải intent-gate: router phân loại sai chiều nào thì
+    # confirm-gate tại tool boundary vẫn chặn mọi write chưa được duyệt.
     if skill_gate.skills_enabled():
         last_human = next((m.content for m in reversed(state["messages"])
                            if m.type == "human"), "")
@@ -95,8 +99,15 @@ def build_graph(llm, tools, checkpointer) -> object:
         g.add_node(spec.node, spec.build(tools))
         g.add_edge(spec.node, END)
     for spec in AGENTIC_SKILLS.values():
-        g.add_node(spec.node, spec.build(llms["planner"], tools))
-        g.add_edge(spec.node, END)
+        # with_config tại wiring (không trong make_node): spike v10 chứng
+        # minh binding giữ nguyên interrupt/resume; spike v10b chứng minh
+        # KHÔNG có nó thì subgraph unbounded (default 25 không truyền vào).
+        g.add_node(spec.node,
+                   spec.build(llms["planner"], tools)
+                       .with_config({"recursion_limit": AGENTIC_RECURSION_LIMIT}))
+        g.add_edge(spec.node, "agentic_context_sync")
+    g.add_node("agentic_context_sync", make_agentic_context_sync_node())
+    g.add_edge("agentic_context_sync", END)
 
     g.set_entry_point("intent_router")
 

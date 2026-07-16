@@ -4,6 +4,8 @@ from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
+import pytest
+
 from langchain_core.messages import HumanMessage
 
 from backend.src.agents.graph import build_graph
@@ -248,10 +250,11 @@ def test_build_graph_registers_agentic_warehouse_receiving_node():
     assert "skill_agentic_warehouse_receiving" in graph.get_graph().nodes
 
 
-def test_agentic_node_edges_straight_to_end():
+def test_agentic_node_edges_to_context_sync():
     graph = build_graph(MagicMock(), tools=[], checkpointer=None)
     edges = [(e.source, e.target) for e in graph.get_graph().edges]
-    assert ("skill_agentic_warehouse_receiving", "__end__") in edges
+    assert ("skill_agentic_warehouse_receiving", "agentic_context_sync") in edges
+    assert ("skill_agentic_warehouse_receiving", "__end__") not in edges
 
 
 def test_route_by_intent_routes_agentic_trigger_to_agentic_node(monkeypatch):
@@ -322,10 +325,11 @@ def test_build_graph_registers_agentic_delivery_node():
     assert "skill_agentic_delivery" in graph.get_graph().nodes
 
 
-def test_agentic_delivery_node_edges_straight_to_end():
+def test_agentic_delivery_node_edges_to_context_sync():
     graph = build_graph(MagicMock(), tools=[], checkpointer=None)
     edges = [(e.source, e.target) for e in graph.get_graph().edges]
-    assert ("skill_agentic_delivery", "__end__") in edges
+    assert ("skill_agentic_delivery", "agentic_context_sync") in edges
+    assert ("skill_agentic_delivery", "__end__") not in edges
 
 
 def test_route_by_intent_routes_delivery_trigger_to_delivery_node(monkeypatch):
@@ -383,7 +387,7 @@ def test_build_graph_registers_every_agentic_registry_entry():
     edges = [(e.source, e.target) for e in graph.get_graph().edges]
     for spec in AGENTIC_SKILLS.values():
         assert spec.node in nodes
-        assert (spec.node, "__end__") in edges
+        assert (spec.node, "agentic_context_sync") in edges
 
 
 def test_route_by_intent_trigger_with_rag_intent_not_hijacked(monkeypatch):
@@ -509,3 +513,90 @@ def test_route_by_intent_discount_command_routes_despite_wrong_intent(monkeypatc
                 content="báo giá chiết khấu cho Cửa hàng ABC, 5 Tủ gỗ")],
             "intent": "erp_read"}
     assert _route_by_intent(state) == "skill_extract"
+
+
+def test_agentic_context_sync_registered_and_edges_to_end():
+    graph = build_graph(MagicMock(), tools=[], checkpointer=None)
+    assert "agentic_context_sync" in graph.get_graph().nodes
+    edges = [(e.source, e.target) for e in graph.get_graph().edges]
+    assert ("agentic_context_sync", "__end__") in edges
+
+
+def test_route_by_intent_env_kill_switch_zero_disables_skills(monkeypatch):
+    # Minor còn treo từ final review Đợt 1: 1 assertion tích hợp xuyên qua
+    # skill_gate THẬT (env var, không monkeypatch hàm) — ERP_SKILLS_ENABLED=0
+    # + trigger + intent erp_write → về planner tầng 1, không skill.
+    from backend.src.agents.graph import _route_by_intent
+    monkeypatch.setenv("ERP_SKILLS_ENABLED", "0")
+    state = {"messages": [HumanMessage(content="quy trình nhập kho cho P00003")],
+            "intent": "erp_write"}
+    assert _route_by_intent(state) == "erp_write"
+
+
+@pytest.mark.asyncio
+async def test_agentic_skill_recursion_bounded_in_real_graph(monkeypatch):
+    # Mirror spike v10b QUA build_graph thật: trước fix này, một model loop
+    # vô hạn trong subgraph chạy KHÔNG GIỚI HẠN (61+ lượt, tripwire spike);
+    # với with_config(AGENTIC_RECURSION_LIMIT=15) tại wiring, nó phải raise
+    # GraphRecursionError và model bị chặn ở ~7-8 lượt gọi.
+    import dataclasses
+    import json as _json
+    from pydantic import PrivateAttr
+    from langchain.agents import create_agent
+    from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.outputs import ChatResult, ChatGeneration
+    from langchain_core.tools import tool
+    from langchain_core.messages import AIMessage
+    from langgraph.errors import GraphRecursionError
+    import backend.src.agents.graph as graph_mod
+    from backend.src.agents import agentic_registry
+
+    calls = {"n": 0}
+
+    @tool("lookup")
+    def lookup(ref: str) -> str:
+        """Fake read tool."""
+        return _json.dumps({"status": "success", "ref": ref})
+
+    class _RouterAndLoopModel(BaseChatModel):
+        # Vai router: trả "erp_write" cho lượt phân loại intent (message
+        # system là INTENT_ROUTER_PROMPT). Vai skill-agent: loop tool-call
+        # vô hạn. Phân biệt bằng việc lượt router không có tool nào bind —
+        # đơn giản hơn: câu system của router chứa "erp_read" (danh sách
+        # intent) — check chuỗi đó.
+        _dummy: list = PrivateAttr(default_factory=list)
+
+        @property
+        def _llm_type(self) -> str:
+            return "routerloop"
+
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
+            sys_text = messages[0].content if messages else ""
+            if "erp_read" in sys_text and "erp_write" in sys_text:
+                return ChatResult(generations=[ChatGeneration(
+                    message=AIMessage(content="erp_write"))])
+            calls["n"] += 1
+            if calls["n"] > 60:
+                raise AssertionError("unbounded: model reached 61 calls")
+            msg = AIMessage(content="", tool_calls=[
+                {"name": "lookup", "args": {"ref": "P1"}, "id": f"l{calls['n']}"}])
+            return ChatResult(generations=[ChatGeneration(message=msg)])
+
+    model = _RouterAndLoopModel()
+
+    def _looping_build(llm, mcp_tools):
+        return create_agent(model, [lookup], system_prompt="t")
+
+    spec = agentic_registry.AGENTIC_SKILLS["warehouse_receiving"]
+    monkeypatch.setitem(agentic_registry.AGENTIC_SKILLS, "warehouse_receiving",
+                        dataclasses.replace(spec, build=_looping_build))
+    monkeypatch.delenv("ERP_SKILLS_ENABLED", raising=False)  # default ON
+
+    graph = graph_mod.build_graph(model, tools=[], checkpointer=None)
+    with pytest.raises(GraphRecursionError):
+        await graph.ainvoke({"messages": [
+            HumanMessage(content="quy trình nhập kho cho P00003")]})
+    assert calls["n"] <= 8, f"limit 15 phải chặn ở ~7-8 lượt, thấy {calls['n']}"

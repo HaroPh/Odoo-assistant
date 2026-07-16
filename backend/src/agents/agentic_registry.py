@@ -14,6 +14,15 @@ from . import skill_agentic_warehouse_receiving
 from . import skill_agentic_delivery
 
 
+# Trần bước cho ReAct loop của một skill (mỗi chu kỳ agent→tools = 2 bước).
+# Flow hợp lệ dài nhất hiện tại (warehouse_receiving: hỏi PO → hỏi số lượng
+# → tra PO → [flag | hỏi QC → receive] → chốt) ≈ 6 lượt model ≈ 13 bước;
+# 15 cho headroom. Spike v10b (2026-07-16): KHÔNG có trần này thì subgraph
+# chạy KHÔNG GIỚI HẠN — mặc định 25 của LangGraph không truyền vào
+# subgraph-as-node, chỉ giá trị tường minh trong config mới kế thừa.
+AGENTIC_RECURSION_LIMIT = 15
+
+
 @dataclass(frozen=True)
 class AgenticSkillSpec:
     node: str                    # graph node name
