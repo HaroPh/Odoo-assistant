@@ -82,6 +82,46 @@ index only ever proposes candidate IDs. Every candidate is re-verified
 against Odoo before being returned, so a stale index can miss a recent
 product, never misreport one.
 
+## Two-tier LLM autonomy
+
+Write operations run at two deliberately different autonomy levels, both
+behind the same safety contract:
+
+| Tier | When it's used | Who decides | Safety mechanism |
+|---|---|---|---|
+| **1 — Deterministic write flows** | Anything describable as one tool call plus one confirmation ("confirm order S00012", "set stock to 40"), plus linear chains between them | The LLM only classifies intent and extracts arguments; deterministic coordinators own entity resolution, draft rendering, and sequencing | Confirmation interrupt before every write; fail-closed write toggle at the MCP layer |
+| **2 — Agentic SOP skills** | Multi-step warehouse procedures with conditional branching and free-form human input (goods receiving with quantity/QC checks, delivery) | A ReAct agent (a LangGraph `create_agent` node) drives the conversation and the tool sequence | The agent never holds a raw write tool — only same-named wrappers that park on a confirmation interrupt; a literal `True` resume is the only path to the real call |
+
+The litmus test is bidirectional: an SOP that turns out to be linear moves
+down to tier 1; a tier-1 action that grows business conditions moves up to
+a skill. Both tiers share one confirmation contract — the same interrupt
+shape, the same yes/no classifier, the same expiry — so the user cannot
+tell which tier is asking.
+
+A third style (per-SOP deterministic coordinators with a dedicated
+extraction call) was built first, A/B-tested against the agentic version
+on a local 8-9B model — 34 live runs plus adversarial probes: pressure to
+skip confirmation, deliberately messy replies, decimal-quantity traps —
+and is being retired: once the confirm gate moved into code, the agentic
+tier matched it on safety and beat it on tolerance to natural, messy
+input.
+
+### Known sharp edges — found via live-verify
+
+- A stray "yes" sent after a completed flow can be read by the tier-1
+  planner as authorization for the next chained write (surfaced when a test
+  driver's over-eager keyword matcher double-confirmed; the
+  write-continuation design accepts this trade-off for now — documented,
+  not yet fixed).
+- The confirmation classifier's keyword fast-path treated the Vietnamese
+  hesitation filler "ừm" ("um...") as a hard yes, so a hedging reply could
+  trigger a real write. Found by probing the gate with deliberately
+  ambiguous replies; fixed in `12af2c3`.
+- Vietnamese "đ" has no Unicode NFD decomposition, so diacritic-folding
+  trigger matching silently missed any phrase containing "đơn" typed with
+  full diacritics. Found the first time a trigger phrase contained that
+  letter; fixed in `984ac99`.
+
 ## Key features
 
 - **Confirm-gated order lifecycle** — quotation → confirm → deliver → invoice
@@ -108,6 +148,7 @@ product, never misreport one.
 | Layer | Mechanism | Guards against |
 |---|---|---|
 | Confirmation | Keyword fast-path + LLM fallback classifier, asymmetric toward UNCLEAR | Executing a write on a misread/ambiguous reply |
+| Agentic tool surface | Tier-2 skills receive write tools only as confirm-gated same-name wrappers; the raw tool object is unreachable from the model | The skill model skipping confirmation under user pressure ("just do it, don't ask") |
 | Write toggle | Fail-closed kill switch read from Odoo config, 5s cache | Writes proceeding when the toggle state is unknown |
 | Model routing | `CLOUD_ALLOWED` role allowlist enforced at the LLM factory, not by convention | Business data leaving to a cloud model via env misconfiguration |
 | MCP tool surface | Deny-by-default method→operation map + per-caller rate limit | Calling an unmapped/unintended Odoo method |
