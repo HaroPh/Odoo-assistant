@@ -312,3 +312,81 @@ def test_build_graph_agentic_node_uses_planner_role(monkeypatch):
     graph_mod.build_graph(llms, tools=[], checkpointer=None)
     assert captured["skill_agentic_warehouse_receiving"] is llms["planner"]
     assert captured["skill_agentic_warehouse_receiving"] is not llms["router"]
+
+
+def test_build_graph_registers_agentic_delivery_node():
+    graph = build_graph(MagicMock(), tools=[], checkpointer=None)
+    assert "skill_agentic_delivery" in graph.get_graph().nodes
+
+
+def test_agentic_delivery_node_edges_straight_to_end():
+    graph = build_graph(MagicMock(), tools=[], checkpointer=None)
+    edges = [(e.source, e.target) for e in graph.get_graph().edges]
+    assert ("skill_agentic_delivery", "__end__") in edges
+
+
+def test_route_by_intent_routes_delivery_trigger_to_delivery_node(monkeypatch):
+    from backend.src.agents.graph import _route_by_intent
+    from backend.src.agents import skill_gate
+    monkeypatch.setattr(skill_gate, "skills_enabled", lambda: True)
+    state = {"messages": [HumanMessage(content="giao hàng cho đơn bán S00012")],
+            "intent": "erp_write"}
+    assert _route_by_intent(state) == "skill_agentic_delivery"
+
+
+def test_route_by_intent_delivery_trigger_diacritic_insensitive(monkeypatch):
+    from backend.src.agents.graph import _route_by_intent
+    from backend.src.agents import skill_gate
+    monkeypatch.setattr(skill_gate, "skills_enabled", lambda: True)
+    state = {"messages": [HumanMessage(content="giao hang cho don ban S00012")],
+            "intent": "erp_write"}
+    assert _route_by_intent(state) == "skill_agentic_delivery"
+
+
+def test_route_by_intent_delivery_trigger_ignored_when_flag_off(monkeypatch):
+    from backend.src.agents.graph import _route_by_intent
+    from backend.src.agents import skill_gate
+    monkeypatch.setattr(skill_gate, "skills_enabled", lambda: False)
+    state = {"messages": [HumanMessage(content="giao hàng cho đơn bán S00012")],
+            "intent": "erp_write"}
+    assert _route_by_intent(state) == "erp_write"
+
+
+def test_route_by_intent_warehouse_receiving_trigger_unaffected_by_delivery_addition(monkeypatch):
+    # Regression guard: thêm nhánh check delivery TRƯỚC nhánh warehouse_
+    # receiving trong _route_by_intent không được làm hỏng routing của
+    # skill anh em đã merge.
+    from backend.src.agents.graph import _route_by_intent
+    from backend.src.agents import skill_gate
+    monkeypatch.setattr(skill_gate, "skills_enabled", lambda: True)
+    state = {"messages": [HumanMessage(content="quy trình nhập kho cho P00003")],
+            "intent": "erp_write"}
+    assert _route_by_intent(state) == "skill_agentic_warehouse_receiving"
+
+
+def test_route_by_intent_discount_quote_unaffected_by_delivery_addition(monkeypatch):
+    from backend.src.agents.graph import _route_by_intent
+    from backend.src.agents import skill_gate
+    monkeypatch.setattr(skill_gate, "skills_enabled", lambda: True)
+    state = {"messages": [HumanMessage(content="báo giá chiết khấu cho Azur")],
+            "intent": "erp_write"}
+    assert _route_by_intent(state) == "skill_extract"
+
+
+def test_build_graph_delivery_node_uses_planner_role(monkeypatch):
+    # Same role-wiring regression pattern as
+    # test_build_graph_agentic_node_uses_planner_role (skill anh em).
+    import backend.src.agents.graph as graph_mod
+    from backend.src.agents.models import ROLES
+    llms = {r: MagicMock(name=r) for r in ROLES}
+    captured = {}
+    real = graph_mod.skill_agentic_delivery.make_node
+
+    def _spy(llm, mcp_tools):
+        captured["skill_agentic_delivery"] = llm
+        return real(llm, mcp_tools)
+
+    monkeypatch.setattr(graph_mod.skill_agentic_delivery, "make_node", _spy)
+    graph_mod.build_graph(llms, tools=[], checkpointer=None)
+    assert captured["skill_agentic_delivery"] is llms["planner"]
+    assert captured["skill_agentic_delivery"] is not llms["router"]
