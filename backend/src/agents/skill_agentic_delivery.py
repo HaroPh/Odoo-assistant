@@ -12,9 +12,8 @@ trong tool của nó compose đúng với checkpointer của outer graph."""
 
 from langchain.agents import create_agent
 from langchain_core.tools import tool
-from langgraph.types import interrupt as _interrupt
 
-from .create_order import _ttl_expiry
+from .agentic_gate import REFUSED_MSG, _confirm_write, ask_human
 from ..erp_query.tools import build_erp_query_tools
 
 TRIGGERS = ("giao hang cho don ban", "xuat kho cho don ban", "giao hang theo don")
@@ -29,10 +28,9 @@ Quy trình, làm đúng thứ tự:
 2. Dùng get_sale_order_detail để tra thông tin đơn (khách hàng, mặt hàng) —
    dùng để có ngữ cảnh, không cần hỏi lại người dùng số liệu này.
 3. Gọi deliver_order để giao hàng.
-4. Báo lại NGUYÊN VĂN kết quả deliver_order trả về cho người dùng — công cụ
-   đã tự xử lý đủ các tình huống (không có phiếu cần giao / chưa sẵn sàng /
-   cần xử lý tay / thành công), không tự diễn giải thêm hay suy đoán khác
-   với nội dung đó.
+4. Thông báo kết quả cho người dùng bằng đúng nội dung câu "display" trong
+   kết quả deliver_order trả về — không thêm suy đoán, không tự diễn giải
+   khác đi, không chép JSON thô ra ngoài.
 
 Quy tắc bắt buộc, không được vi phạm:
 - Không được bịa mã đơn bán hoặc số liệu không có trong hội thoại hoặc kết
@@ -44,28 +42,6 @@ Quy tắc bắt buộc, không được vi phạm:
   người dùng muốn làm gì tiếp.
 - KHÔNG tự động đề xuất hoặc thực hiện bước tiếp theo (tạo hóa đơn) sau khi
   giao hàng xong — dừng lại ở đó, chờ yêu cầu mới từ người dùng."""
-
-REFUSED_MSG = ("Người dùng TỪ CHỐI xác nhận — KHÔNG thực hiện thao tác. "
-               "Hãy hỏi người dùng muốn làm gì tiếp.")
-
-
-@tool
-def ask_human(question: str) -> str:
-    """Hỏi người dùng một câu hỏi mở và chờ câu trả lời. Dùng khi cần thông
-    tin chỉ con người mới biết được (mã đơn bán chưa nêu rõ...). KHÔNG được
-    tự suy đoán thay cho việc hỏi."""
-    return _interrupt({"kind": "free_text", "question": question})
-
-
-def _confirm_write(question: str) -> bool:
-    """Cổng xác nhận cứng tại ranh giới tool ghi — model không bao giờ thấy
-    tool ghi thô nên không có đường vòng nào bỏ qua cổng này. kind="confirm"
-    đi qua erp_agent._decide_resume (phân loại có/không → resume bool); để
-    quá TTL → resume False. Chỉ True tuyệt đối mới cho ghi."""
-    answer = _interrupt({"kind": "confirm", "question": question,
-                         "expires_at": _ttl_expiry()})
-    return answer is True
-
 
 def _build_tools(mcp_tools):
     by_name = {t.name: t for t in mcp_tools}
