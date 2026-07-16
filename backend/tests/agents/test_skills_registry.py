@@ -1,6 +1,6 @@
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
-from backend.src.agents.skills import SKILLS, match_skill, SkillSpec
+from backend.src.agents.skills import SKILLS, match_skill, SkillSpec, _fold
 
 
 def test_skills_registry_has_only_discount_quote():
@@ -30,6 +30,18 @@ def test_match_skill_no_trigger_returns_none():
     assert match_skill("xác nhận đơn S00012") is None
     assert match_skill("") is None
     assert match_skill(None) is None
+
+
+def test_fold_strips_dd_stroke_letter():
+    # Regression (found 2026-07-16 via feat/agentic-delivery's wiring
+    # tests): đ/Đ have no NFD decomposition (unlike á/ơ/ậ...), so plain
+    # combining-mark stripping used to leave them untouched — a trigger
+    # phrase containing "đơn" silently failed to match naturally-typed
+    # diacritic input ("giao hàng cho đơn bán" folded to "...đon ban...",
+    # not "...don ban...").
+    assert _fold("đơn hàng") == "don hang"
+    assert _fold("Đơn Hàng") == "don hang"
+    assert _fold("giao hàng cho đơn bán") == "giao hang cho don ban"
 
 
 def test_match_skill_no_longer_resolves_warehouse_receiving():

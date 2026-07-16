@@ -34,9 +34,18 @@ SKILLS = {
 }
 
 
+_EXTRA_FOLD = str.maketrans("đĐ", "dD")
+
+
 def _fold(s: str) -> str:
+    # đ/Đ (U+0111/U+0110) are standalone Vietnamese letters with no NFD
+    # decomposition — combining-mark stripping alone leaves them untouched,
+    # unlike vowels with tone/horn marks (á, ơ...). Explicit translate closes
+    # that gap (found 2026-07-16: a trigger phrase containing "đơn" silently
+    # failed to match naturally-typed diacritic input).
     nfd = unicodedata.normalize("NFD", (s or "").lower())
-    return "".join(ch for ch in nfd if not unicodedata.combining(ch))
+    stripped = "".join(ch for ch in nfd if not unicodedata.combining(ch))
+    return stripped.translate(_EXTRA_FOLD)
 
 
 def match_skill(text: str) -> str | None:
