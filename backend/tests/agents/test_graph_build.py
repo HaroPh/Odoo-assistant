@@ -600,3 +600,81 @@ async def test_agentic_skill_recursion_bounded_in_real_graph(monkeypatch):
         await graph.ainvoke({"messages": [
             HumanMessage(content="quy trình nhập kho cho P00003")]})
     assert calls["n"] <= 8, f"limit 15 phải chặn ở ~7-8 lượt, thấy {calls['n']}"
+
+
+@pytest.mark.asyncio
+async def test_agentic_skill_success_populates_working_context_via_real_graph(monkeypatch):
+    # End-to-end qua build_graph THẬT, xuyên cả 3 commit của Đợt 2 cùng lúc
+    # (không task-scoped review nào đơn lẻ có bối cảnh để bắt gap này):
+    # skill hoàn tất bình thường (không loop) → wrapper gọi tool ghi thật →
+    # content trả về đúng SHAPE MCP thật (list content-block, KHÔNG phải
+    # chuỗi trần — langchain_mcp_adapters luôn trả list) → agentic_context_
+    # sync phải parse đúng và set working_context trong state cuối cùng.
+    # Regression cho bug tìm ở final review Đợt 2: fixture chuỗi trần của
+    # unit test agentic_context_sync.py từng khiến 7/7 test xanh trong khi
+    # sync KHÔNG BAO GIỜ chạy được với write thật.
+    import dataclasses
+    import json as _json
+    from pydantic import PrivateAttr
+    from langchain.agents import create_agent
+    from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.outputs import ChatResult, ChatGeneration
+    from langchain_core.tools import tool
+    from langchain_core.messages import AIMessage
+    import backend.src.agents.graph as graph_mod
+    from backend.src.agents import agentic_registry
+
+    def _envelope():
+        return _json.dumps({"ok": True, "ref": "P00021", "model": "purchase.order",
+                            "res_id": 9, "state": "purchase",
+                            "display": "Đã nhận hàng cho đơn mua P00021."},
+                           ensure_ascii=False)
+
+    @tool("receive_order")
+    def fake_receive_order(order_ref: str) -> list:
+        """Fake write tool — trả ĐÚNG shape MCP thật: list content-block,
+        không phải chuỗi trần (langchain_mcp_adapters, response_format=
+        content_and_artifact)."""
+        return [{"type": "text", "text": _envelope()}]
+
+    class _RouterAndSkillModel(BaseChatModel):
+        _step: list = PrivateAttr(default_factory=lambda: [0])
+
+        @property
+        def _llm_type(self) -> str:
+            return "routerskill"
+
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
+            sys_text = messages[0].content if messages else ""
+            if "erp_read" in sys_text and "erp_write" in sys_text:
+                return ChatResult(generations=[ChatGeneration(
+                    message=AIMessage(content="erp_write"))])
+            i = self._step[0]
+            self._step[0] += 1
+            steps = [
+                AIMessage(content="", tool_calls=[
+                    {"name": "receive_order", "args": {"order_ref": "P00021"}, "id": "c1"}]),
+                AIMessage(content="Đã nhận hàng xong."),
+            ]
+            return ChatResult(generations=[ChatGeneration(message=steps[i])])
+
+    model = _RouterAndSkillModel()
+
+    def _skill_build(llm, mcp_tools):
+        return create_agent(model, [fake_receive_order], system_prompt="t")
+
+    spec = agentic_registry.AGENTIC_SKILLS["warehouse_receiving"]
+    monkeypatch.setitem(agentic_registry.AGENTIC_SKILLS, "warehouse_receiving",
+                        dataclasses.replace(spec, build=_skill_build))
+    monkeypatch.delenv("ERP_SKILLS_ENABLED", raising=False)  # default ON
+
+    graph = graph_mod.build_graph(model, tools=[], checkpointer=None)
+    result = await graph.ainvoke({"messages": [
+        HumanMessage(content="quy trình nhập kho cho P00003")]})
+
+    assert result.get("working_context") == {
+        "ref": "P00021", "model": "purchase.order",
+        "display": "Đã nhận hàng cho đơn mua P00021."}

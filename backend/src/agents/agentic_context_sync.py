@@ -12,6 +12,7 @@ history client gửi (chỉ user/assistant) nên ToolMessage lượt cũ không 
 đọng; ranh giới này bảo đảm chỉ đọc kết quả tool của lượt đang xử lý."""
 import json
 
+from .tool_result import _tool_result_text
 from .working_context import derive_working_context
 
 
@@ -23,8 +24,15 @@ def make_agentic_context_sync_node():
                     break
                 if getattr(msg, "type", "") != "tool":
                     continue
+                # ToolMessage.content từ MCP tool là list content-block dict
+                # ([{"type":"text","text":"..."}]), không phải chuỗi trần —
+                # _tool_result_text (đã dùng ở tầng 1, tool_result.py) chuẩn
+                # hoá trước khi parse JSON. Thiếu bước này: json.loads(list)
+                # raise TypeError, bị nuốt bởi except bên dưới, sync KHÔNG
+                # BAO GIỜ chạy được với write thật (chỉ pass với fixture
+                # chuỗi test cũ) — bug thật, tìm ra ở final review Đợt 2.
                 try:
-                    env = json.loads(msg.content)
+                    env = json.loads(_tool_result_text(msg.content))
                 except (TypeError, ValueError):
                     continue          # REFUSED_MSG / text thường — bỏ qua
                 wc = derive_working_context(env)

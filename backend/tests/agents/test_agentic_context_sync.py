@@ -28,6 +28,31 @@ async def test_sets_working_context_from_write_envelope():
 
 
 @pytest.mark.asyncio
+async def test_sets_working_context_from_real_mcp_content_block_shape():
+    # Regression (found 2026-07-16 final review): a real ToolMessage from an
+    # MCP write tool has content = [{"type": "text", "text": "<json>"}], NOT
+    # a bare string — langchain_mcp_adapters always returns list-of-blocks
+    # content (response_format="content_and_artifact"). The bare-string
+    # fixture in test_sets_working_context_from_write_envelope above never
+    # exercises this shape, so the original json.loads(msg.content) silently
+    # failed (TypeError swallowed) against every real skill write — the sync
+    # node never fired in production despite 7 green unit tests. Fixed via
+    # _tool_result_text (already used by tier-1's parse_write_result for the
+    # exact same normalization).
+    node = make_agentic_context_sync_node()
+    state = {"messages": [
+        HumanMessage(content="nhập kho P00021"),
+        AIMessage(content=""),
+        ToolMessage(content=[{"type": "text", "text": _env()}], tool_call_id="c1"),
+        AIMessage(content="Đã xong."),
+    ]}
+    upd = await node(state)
+    assert upd == {"working_context": {
+        "ref": "P00021", "model": "purchase.order",
+        "display": "Đã nhận hàng cho đơn mua P00021."}}
+
+
+@pytest.mark.asyncio
 async def test_refusal_string_tool_message_yields_no_update():
     # REFUSED_MSG không phải JSON → json.loads fail → bỏ qua, không update.
     node = make_agentic_context_sync_node()
