@@ -18,20 +18,22 @@ from .models import llms_from_single
 from .skills import SKILLS, match_skill, make_skill_extract_node, route_after_skill_extract
 from .skills import _fold
 from . import skill_gate
-from . import skill_agentic_warehouse_receiving
-from . import skill_agentic_delivery
-from .skill_warehouse_receiving import TRIGGERS as _AGENTIC_WR_TRIGGERS
+from .agentic_registry import AGENTIC_SKILLS
 
 
 def _route_by_intent(state: ERPAgentState) -> str:
-    if skill_gate.skills_enabled():
+    # Intent-gate: skill trigger chỉ được cướp luồng khi router đã phân loại
+    # erp_write. Thiếu gate này, câu HỎI chứa cụm trigger bị hijack vào
+    # THỰC THI SOP ("quy trình nhập kho là gì?" → skill thay vì RAG) — lý do
+    # ERP_SKILLS_ENABLED từng phải default-off. False-negative degrade mềm:
+    # router phân loại sai thì rơi về tầng 1, nơi cùng tool vẫn xử lý được.
+    if skill_gate.skills_enabled() and state.get("intent") == "erp_write":
         last_human = next((m.content for m in reversed(state["messages"])
                            if m.type == "human"), "")
         folded = _fold(last_human)
-        if any(kw in folded for kw in skill_agentic_delivery.TRIGGERS):
-            return "skill_agentic_delivery"
-        if any(kw in folded for kw in _AGENTIC_WR_TRIGGERS):
-            return "skill_agentic_warehouse_receiving"
+        for spec in AGENTIC_SKILLS.values():
+            if any(kw in folded for kw in spec.triggers):
+                return spec.node
         if match_skill(last_human):
             return "skill_extract"
     return state.get("intent") or "unknown"
@@ -69,12 +71,9 @@ def build_graph(llm, tools, checkpointer) -> object:
     for spec in SKILLS.values():
         g.add_node(spec.node, spec.build(tools))
         g.add_edge(spec.node, END)
-    g.add_node("skill_agentic_warehouse_receiving",
-              skill_agentic_warehouse_receiving.make_node(llms["planner"], tools))
-    g.add_edge("skill_agentic_warehouse_receiving", END)
-    g.add_node("skill_agentic_delivery",
-              skill_agentic_delivery.make_node(llms["planner"], tools))
-    g.add_edge("skill_agentic_delivery", END)
+    for spec in AGENTIC_SKILLS.values():
+        g.add_node(spec.node, spec.build(llms["planner"], tools))
+        g.add_edge(spec.node, END)
 
     g.set_entry_point("intent_router")
 
@@ -85,9 +84,8 @@ def build_graph(llm, tools, checkpointer) -> object:
         "mixed": "mixed",
         "unknown": "respond_unknown",
         "skill_extract": "skill_extract",
-        "skill_agentic_warehouse_receiving": "skill_agentic_warehouse_receiving",
-        "skill_agentic_delivery": "skill_agentic_delivery",
     }
+    intent_targets.update({spec.node: spec.node for spec in AGENTIC_SKILLS.values()})
     g.add_conditional_edges("intent_router", _route_by_intent, intent_targets)
     skill_targets = {END: END}
     skill_targets.update({spec.node: spec.node for spec in SKILLS.values()})

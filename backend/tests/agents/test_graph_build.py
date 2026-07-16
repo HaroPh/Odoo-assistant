@@ -294,24 +294,27 @@ def test_route_by_intent_discount_quote_still_goes_through_skill_extract(monkeyp
     assert _route_by_intent(state) == "skill_extract"
 
 
-def test_build_graph_agentic_node_uses_planner_role(monkeypatch):
-    # Same role-wiring regression pattern as test_build_graph_accepts_role_mapping
-    # (that test's own coverage for skill_extract, added in the pilot's
-    # Task 6 fix round) — extended here for the agentic node's own llm param.
+def test_build_graph_agentic_nodes_use_planner_role(monkeypatch):
+    # Registry-based spy (thay cho 2 spy test per-module cũ — graph.py không
+    # còn import từng skill module sau khi registry hóa): mọi agentic skill
+    # phải được build với đúng llms["planner"], không phải role khác.
+    import dataclasses
     import backend.src.agents.graph as graph_mod
+    from backend.src.agents import agentic_registry
     from backend.src.agents.models import ROLES
     llms = {r: MagicMock(name=r) for r in ROLES}
     captured = {}
-    real = graph_mod.skill_agentic_warehouse_receiving.make_node
-
-    def _spy(llm, mcp_tools):
-        captured["skill_agentic_warehouse_receiving"] = llm
-        return real(llm, mcp_tools)
-
-    monkeypatch.setattr(graph_mod.skill_agentic_warehouse_receiving, "make_node", _spy)
+    for name, spec in list(agentic_registry.AGENTIC_SKILLS.items()):
+        def _spy(llm, mcp_tools, _name=name, _real=spec.build):
+            captured[_name] = llm
+            return _real(llm, mcp_tools)
+        monkeypatch.setitem(agentic_registry.AGENTIC_SKILLS, name,
+                            dataclasses.replace(spec, build=_spy))
     graph_mod.build_graph(llms, tools=[], checkpointer=None)
-    assert captured["skill_agentic_warehouse_receiving"] is llms["planner"]
-    assert captured["skill_agentic_warehouse_receiving"] is not llms["router"]
+    assert set(captured) == set(agentic_registry.AGENTIC_SKILLS)
+    for name, llm in captured.items():
+        assert llm is llms["planner"], name
+        assert llm is not llms["router"], name
 
 
 def test_build_graph_registers_agentic_delivery_node():
@@ -373,20 +376,45 @@ def test_route_by_intent_discount_quote_unaffected_by_delivery_addition(monkeypa
     assert _route_by_intent(state) == "skill_extract"
 
 
-def test_build_graph_delivery_node_uses_planner_role(monkeypatch):
-    # Same role-wiring regression pattern as
-    # test_build_graph_agentic_node_uses_planner_role (skill anh em).
-    import backend.src.agents.graph as graph_mod
-    from backend.src.agents.models import ROLES
-    llms = {r: MagicMock(name=r) for r in ROLES}
-    captured = {}
-    real = graph_mod.skill_agentic_delivery.make_node
+def test_build_graph_registers_every_agentic_registry_entry():
+    from backend.src.agents.agentic_registry import AGENTIC_SKILLS
+    graph = build_graph(MagicMock(), tools=[], checkpointer=None)
+    nodes = graph.get_graph().nodes
+    edges = [(e.source, e.target) for e in graph.get_graph().edges]
+    for spec in AGENTIC_SKILLS.values():
+        assert spec.node in nodes
+        assert (spec.node, "__end__") in edges
 
-    def _spy(llm, mcp_tools):
-        captured["skill_agentic_delivery"] = llm
-        return real(llm, mcp_tools)
 
-    monkeypatch.setattr(graph_mod.skill_agentic_delivery, "make_node", _spy)
-    graph_mod.build_graph(llms, tools=[], checkpointer=None)
-    assert captured["skill_agentic_delivery"] is llms["planner"]
-    assert captured["skill_agentic_delivery"] is not llms["router"]
+def test_route_by_intent_trigger_with_rag_intent_not_hijacked(monkeypatch):
+    # Intent-gate: câu HỎI về quy trình ("... là gì?") chứa cụm trigger
+    # nhưng router phân loại rag → phải đi RAG, không bị cướp vào THỰC THI
+    # SOP. Đây là lỗ hổng từng buộc ERP_SKILLS_ENABLED default-off.
+    from backend.src.agents.graph import _route_by_intent
+    from backend.src.agents import skill_gate
+    monkeypatch.setattr(skill_gate, "skills_enabled", lambda: True)
+    state = {"messages": [HumanMessage(content="quy trình nhập kho là gì?")],
+            "intent": "rag"}
+    assert _route_by_intent(state) == "rag"
+
+
+def test_route_by_intent_trigger_with_read_intent_not_hijacked(monkeypatch):
+    from backend.src.agents.graph import _route_by_intent
+    from backend.src.agents import skill_gate
+    monkeypatch.setattr(skill_gate, "skills_enabled", lambda: True)
+    state = {"messages": [HumanMessage(
+                content="kiểm tra tình trạng giao hàng theo đơn S00074")],
+            "intent": "erp_read"}
+    assert _route_by_intent(state) == "erp_read"
+
+
+def test_route_by_intent_discount_trigger_with_rag_intent_not_hijacked(monkeypatch):
+    # Gate áp cho cả nhánh match_skill (#2) — hỏi chính sách chiết khấu
+    # không bị đưa vào skill_extract.
+    from backend.src.agents.graph import _route_by_intent
+    from backend.src.agents import skill_gate
+    monkeypatch.setattr(skill_gate, "skills_enabled", lambda: True)
+    state = {"messages": [HumanMessage(
+                content="chính sách báo giá chiết khấu như thế nào?")],
+            "intent": "rag"}
+    assert _route_by_intent(state) == "rag"
