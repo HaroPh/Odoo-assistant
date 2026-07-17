@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 from backend.tests.live_verify_common import (
     odoo_transport, drive_conversation, drive_fixed_turns,
     has_tool_leak, Scenario, print_result)
+from backend.src.agents.tool_leak_guard import TOOL_LEAK_FALLBACK_MSG
 
 
 def _make_fresh_confirmed_po(odoo, qty_per_line: int) -> tuple[str, int]:
@@ -143,8 +144,18 @@ def scenario_no_po_tool_leak(odoo) -> Scenario:
     if leaks:
         return Scenario("no_po_tool_leak", False, len(answers),
                         f"lộ tool name ở lượt {list(leaks.keys())}: {leaks}")
+    # "điều chỉnh tồn kho" = anchor ngắn của NO_PO_BRIDGE_MSG (không so khớp
+    # chuỗi đầy đủ — model 8-9B được dặn trả "đúng nguyên văn" nhưng có thể
+    # paraphrase nhẹ; anchor ngắn chịu được lệch nhỏ. TOOL_LEAK_FALLBACK_MSG
+    # thì so khớp chính xác vì đó là chuỗi do CODE trả, không phải model).
+    has_bridge = any("điều chỉnh tồn kho" in a or TOOL_LEAK_FALLBACK_MSG in a
+                     for a in answers)
+    if not has_bridge:
+        return Scenario("no_po_tool_leak", False, len(answers),
+                        "không lộ tool name nhưng cũng không có câu bridge/fallback "
+                        "— dead-end im lặng (finding #4 gốc)")
     return Scenario("no_po_tool_leak", True, len(answers),
-                    f"không lộ tool name qua {len(answers)} lượt")
+                    f"không lộ tool name qua {len(answers)} lượt, có bridge/fallback")
 
 
 def scenario_refusal(odoo) -> Scenario:
