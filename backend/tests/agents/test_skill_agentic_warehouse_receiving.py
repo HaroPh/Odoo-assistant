@@ -373,3 +373,9 @@ def test_build_tools_empty_mcp_exposes_no_write_wrappers():
     # wrapper tương ứng, chỉ còn đúng 2 tool an toàn.
     names = {t.name for t in sawr._build_tools([])}
     assert names == {"ask_human", "get_purchase_order_detail"}
+
+
+def test_sop_prompt_contains_no_po_bridge_message_verbatim():
+    # Guards against a broken f-string interpolation silently dropping the
+    # bridge text from the prompt the model actually sees.
+    assert sawr.NO_PO_BRIDGE_MSG in sawr.SOP_PROMPT

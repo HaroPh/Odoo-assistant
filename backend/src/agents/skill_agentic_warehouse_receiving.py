@@ -1,6 +1,8 @@
 """Agentic warehouse_receiving SOP skill (tier-2): nhập kho theo quy trình,
 driven bởi create_agent ReAct loop với confirm-gate tại tool boundary. Xem
-docs/superpowers/specs/2026-07-15-agentic-wr-guardrails-design.md.
+docs/superpowers/specs/2026-07-15-agentic-wr-guardrails-design.md và
+docs/superpowers/specs/2026-07-17-sop-tier1-handoff-design.md (nhánh "không
+có PO", finding #4 — SOP không có lối thoát về tier-1 inventory_adjustment).
 
 The returned CompiledStateGraph from make_node() MUST be added directly as
 a node in the outer graph (g.add_node(name, make_node(...))), never wrapped
@@ -15,7 +17,19 @@ from ..erp_query.tools import build_erp_query_tools
 
 TRIGGERS = ("quy trinh nhap kho", "nhap kho theo quy trinh")
 
-SOP_PROMPT = """Bạn là trợ lý kho, thực hiện quy trình nhập kho. Bạn có các
+# Câu bridge cố định sang tier-1 inventory_adjustment — model được dặn trả
+# ĐÚNG NGUYÊN VĂN chuỗi này (không tự diễn giải) để giảm biến thiên. Route
+# "điều chỉnh tồn kho <tên> về <số lượng>" đã verify KHÔNG khớp TRIGGERS ở
+# trên nên tin nhắn kế tiếp của user route đúng qua erp_write_planner ->
+# inventory_adjustment (backend/src/agents/inventory_write.py) — không cần
+# đổi gì ở graph.py/agentic_registry.py.
+NO_PO_BRIDGE_MSG = (
+    "Quy trình nhập kho này yêu cầu có đơn mua (PO). Nếu bạn chỉ cần cập "
+    "nhật số lượng tồn kho trực tiếp, hãy nói ví dụ: 'điều chỉnh tồn kho "
+    "<tên sản phẩm> về <số lượng>' — tôi sẽ thực hiện ngay."
+)
+
+SOP_PROMPT = f"""Bạn là trợ lý kho, thực hiện quy trình nhập kho. Bạn có các
 công cụ: get_purchase_order_detail (tra chi tiết đơn mua), ask_human (hỏi
 người dùng và chờ trả lời), receive_order (xác nhận nhận hàng vào Odoo),
 flag_order_for_review (ghi chú nội bộ lên đơn khi có bất thường — dùng thay
@@ -24,20 +38,24 @@ vì receive_order khi số lượng không khớp).
 Quy trình, làm đúng thứ tự:
 1. Xác định mã đơn mua cần nhập kho từ yêu cầu của người dùng. Nếu tin nhắn
    chưa nêu rõ mã đơn, dùng ask_human để hỏi.
-2. Dùng ask_human hỏi người dùng đã kiểm đếm hàng chưa và số lượng thực
+2. Nếu người dùng cho biết KHÔNG CÓ đơn mua (chưa tạo, không định tạo, muốn
+   nhập thẳng không qua PO): DỪNG NGAY quy trình này, không hỏi thêm gì về
+   số lượng hay QC, không nhắc tên bất kỳ công cụ nào. Trả lời đúng nguyên
+   văn (không diễn giải khác, không thêm bớt): "{NO_PO_BRIDGE_MSG}"
+3. Dùng ask_human hỏi người dùng đã kiểm đếm hàng chưa và số lượng thực
    nhận (tổng tất cả mặt hàng, một con số) là bao nhiêu.
-3. Dùng get_purchase_order_detail để tra số lượng đã đặt trên đơn mua đó.
-4. So sánh số lượng thực nhận (bước 2) với tổng số lượng trên đơn (bước 3):
-   - Nếu KHỚP: tiếp tục bước 5.
+4. Dùng get_purchase_order_detail để tra số lượng đã đặt trên đơn mua đó.
+5. So sánh số lượng thực nhận (bước 3) với tổng số lượng trên đơn (bước 4):
+   - Nếu KHỚP: tiếp tục bước 6.
    - Nếu KHÔNG KHỚP (thiếu hoặc thừa): PHẢI dùng flag_order_for_review để
      ghi chú rõ tình trạng (thiếu bao nhiêu / thừa bao nhiêu). TUYỆT ĐỐI
      KHÔNG được gọi receive_order trong trường hợp này. Dừng quy trình,
      báo lại kết quả cho người dùng.
-5. Nếu số lượng khớp, dùng ask_human hỏi bộ phận QC đã kiểm tra chất lượng
+6. Nếu số lượng khớp, dùng ask_human hỏi bộ phận QC đã kiểm tra chất lượng
    xong chưa và kết quả (đạt hay không đạt).
    - Nếu KHÔNG ĐẠT: KHÔNG được gọi receive_order. Báo lại cho người dùng
      là hàng không đạt QC, chờ xử lý theo quy trình trả hàng.
-6. Nếu QC đạt: gọi receive_order. Khi bạn gọi công cụ ghi (receive_order
+7. Nếu QC đạt: gọi receive_order. Khi bạn gọi công cụ ghi (receive_order
    hoặc flag_order_for_review), hệ thống sẽ TỰ ĐỘNG hỏi người dùng xác nhận
    trước khi ghi — bạn KHÔNG cần tự hỏi xác nhận trước bằng ask_human. Nếu
    công cụ trả về "Người dùng TỪ CHỐI xác nhận", không thử gọi lại ngay —
