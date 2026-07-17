@@ -25,6 +25,7 @@ from backend.jobs import eval_gate  # noqa: F401  (đăng ký side-effect)
 from backend.jobs import e2e_smoke  # noqa: F401  (đăng ký side-effect)
 from backend.jobs import e2e_skill_discount  # noqa: F401  (đăng ký side-effect)
 from backend.jobs import e2e_skill_warehouse  # noqa: F401  (đăng ký side-effect)
+from backend.jobs import e2e_skill_delivery  # noqa: F401  (đăng ký side-effect)
 
 from backend.jobs.registry import (INFRA_ERROR, JOBS, JobResult, write_result)
 
