@@ -23,6 +23,7 @@ for _stream in (sys.stdout, sys.stderr):
 # ── job modules đăng ký tại import (Task 3/4 thêm dòng ở đây) ────────────────
 from backend.jobs import eval_gate  # noqa: F401  (đăng ký side-effect)
 from backend.jobs import e2e_smoke  # noqa: F401  (đăng ký side-effect)
+from backend.jobs import e2e_skill_discount  # noqa: F401  (đăng ký side-effect)
 
 from backend.jobs.registry import (INFRA_ERROR, JOBS, JobResult, write_result)
 
