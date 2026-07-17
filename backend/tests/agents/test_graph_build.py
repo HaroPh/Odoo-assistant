@@ -155,8 +155,6 @@ def test_build_graph_accepts_role_mapping(monkeypatch):
                          spy_llm_tools("mixed", graph_mod.make_fusion_node))
     monkeypatch.setattr(graph_mod, "make_respond_unknown_node",
                          spy_llm_only("respond_unknown", graph_mod.make_respond_unknown_node))
-    monkeypatch.setattr(graph_mod, "make_skill_extract_node",
-                         spy_llm_only("skill_extract", graph_mod.make_skill_extract_node))
 
     # Coordinators (create_order/create_rfq/.../inventory_adjust) receive
     # llms["planner"] too, via spec.build(llms["planner"], tools) in
@@ -187,7 +185,6 @@ def test_build_graph_accepts_role_mapping(monkeypatch):
     assert captured["create_order"] is llms["planner"]
     assert captured["create_rfq"] is llms["planner"]
     assert captured["inventory_adjust"] is llms["planner"]
-    assert captured["skill_extract"] is llms["planner"]
 
     # ...and critically NOT some other role's llm — this is what catches a
     # role-swap bug (e.g. llms["read"] accidentally wired to router/planner).
@@ -200,20 +197,6 @@ def test_build_graph_accepts_role_mapping(monkeypatch):
     assert captured["rag"] is not llms["fusion"]
     assert captured["mixed"] is not llms["synthesis"]
     assert captured["respond_unknown"] is not llms["router"]
-    assert captured["skill_extract"] is not llms["router"]
-
-
-def test_build_graph_registers_skill_nodes():
-    graph = build_graph(MagicMock(), tools=[], checkpointer=None)
-    nodes = graph.get_graph().nodes
-    assert {"skill_extract", "skill_discount_quote"} <= set(nodes)
-    assert "skill_warehouse_receiving" not in nodes  # removed from SKILLS this branch
-
-
-def test_skill_nodes_edge_straight_to_end():
-    graph = build_graph(MagicMock(), tools=[], checkpointer=None)
-    edges = [(e.source, e.target) for e in graph.get_graph().edges]
-    assert ("skill_discount_quote", "__end__") in edges
 
 
 def test_route_by_intent_ignores_skills_when_flag_off(monkeypatch):
@@ -227,13 +210,13 @@ def test_route_by_intent_ignores_skills_when_flag_off(monkeypatch):
     assert _route_by_intent(state) == "erp_write"
 
 
-def test_route_by_intent_routes_to_skill_extract_when_flag_on_and_triggered(monkeypatch):
+def test_route_by_intent_routes_discount_trigger_to_agentic_node(monkeypatch):
     from backend.src.agents.graph import _route_by_intent
     from backend.src.agents import skill_gate
     monkeypatch.setattr(skill_gate, "skills_enabled", lambda: True)
     state = {"messages": [HumanMessage(content="báo giá chiết khấu cho Azur")],
             "intent": "erp_write"}
-    assert _route_by_intent(state) == "skill_extract"
+    assert _route_by_intent(state) == "skill_agentic_discount_quote"
 
 
 def test_route_by_intent_flag_on_but_no_trigger_falls_through(monkeypatch):
@@ -284,19 +267,6 @@ def test_route_by_intent_agentic_trigger_ignored_when_flag_off(monkeypatch):
     assert _route_by_intent(state) == "erp_write"
 
 
-def test_route_by_intent_discount_quote_still_goes_through_skill_extract(monkeypatch):
-    # Regression guard: the new agentic-specific check must not shadow the
-    # unrelated discount_quote trigger, which still goes through the
-    # generic SKILLS/skill_extract path (Task 1 only removed
-    # warehouse_receiving from SKILLS, not discount_quote).
-    from backend.src.agents.graph import _route_by_intent
-    from backend.src.agents import skill_gate
-    monkeypatch.setattr(skill_gate, "skills_enabled", lambda: True)
-    state = {"messages": [HumanMessage(content="báo giá chiết khấu cho Azur")],
-            "intent": "erp_write"}
-    assert _route_by_intent(state) == "skill_extract"
-
-
 def test_build_graph_agentic_nodes_use_planner_role(monkeypatch):
     # Registry-based spy (thay cho 2 spy test per-module cũ — graph.py không
     # còn import từng skill module sau khi registry hóa): mọi agentic skill
@@ -330,6 +300,27 @@ def test_agentic_delivery_node_edges_to_context_sync():
     edges = [(e.source, e.target) for e in graph.get_graph().edges]
     assert ("skill_agentic_delivery", "agentic_context_sync") in edges
     assert ("skill_agentic_delivery", "__end__") not in edges
+
+
+def test_build_graph_registers_agentic_discount_node():
+    graph = build_graph(MagicMock(), tools=[], checkpointer=None)
+    assert "skill_agentic_discount_quote" in graph.get_graph().nodes
+
+
+def test_agentic_discount_node_edges_to_context_sync():
+    graph = build_graph(MagicMock(), tools=[], checkpointer=None)
+    edges = [(e.source, e.target) for e in graph.get_graph().edges]
+    assert ("skill_agentic_discount_quote", "agentic_context_sync") in edges
+    assert ("skill_agentic_discount_quote", "__end__") not in edges
+
+
+def test_tier2_deterministic_nodes_gone():
+    # Đợt 3: hạ tầng tất định per-SOP nghỉ hưu — node của nó không còn
+    # trong graph, mọi SOP skill đi qua registry agentic duy nhất.
+    graph = build_graph(MagicMock(), tools=[], checkpointer=None)
+    nodes = set(graph.get_graph().nodes)
+    assert "skill_extract" not in nodes
+    assert "skill_discount_quote" not in nodes
 
 
 def test_route_by_intent_routes_delivery_trigger_to_delivery_node(monkeypatch):
@@ -377,7 +368,8 @@ def test_route_by_intent_discount_quote_unaffected_by_delivery_addition(monkeypa
     monkeypatch.setattr(skill_gate, "skills_enabled", lambda: True)
     state = {"messages": [HumanMessage(content="báo giá chiết khấu cho Azur")],
             "intent": "erp_write"}
-    assert _route_by_intent(state) == "skill_extract"
+    # Từ Đợt 3 discount_quote là skill agentic — vẫn phải không bị delivery che.
+    assert _route_by_intent(state) == "skill_agentic_discount_quote"
 
 
 def test_build_graph_registers_every_agentic_registry_entry():
@@ -413,8 +405,8 @@ def test_route_by_intent_trigger_with_read_intent_not_hijacked(monkeypatch):
 
 
 def test_route_by_intent_discount_trigger_with_rag_intent_not_hijacked(monkeypatch):
-    # Gate áp cho cả nhánh match_skill (#2) — hỏi chính sách chiết khấu
-    # không bị đưa vào skill_extract.
+    # Gate áp cho mọi agentic trigger — hỏi chính sách chiết khấu không bị
+    # đưa vào skill thực thi.
     from backend.src.agents.graph import _route_by_intent
     from backend.src.agents import skill_gate
     monkeypatch.setattr(skill_gate, "skills_enabled", lambda: True)
@@ -437,7 +429,7 @@ def test_route_by_intent_discount_trigger_with_rag_intent_not_hijacked(monkeypat
 
 def test_looks_like_question_detects_all_markers():
     from backend.src.agents.graph import _looks_like_question
-    from backend.src.agents.skills import _fold
+    from backend.src.agents.skill_gate import _fold
     questions = [
         "quy trình nhập kho là gì?",
         "kiểm tra tình trạng giao hàng theo đơn S00074",
@@ -455,7 +447,7 @@ def test_looks_like_question_detects_all_markers():
 
 def test_looks_like_question_false_for_plain_commands():
     from backend.src.agents.graph import _looks_like_question
-    from backend.src.agents.skills import _fold
+    from backend.src.agents.skill_gate import _fold
     commands = [
         "làm quy trình nhập kho cho đơn mua P00021",
         "nhập kho theo quy trình cho đơn mua P00021",
@@ -512,7 +504,7 @@ def test_route_by_intent_discount_command_routes_despite_wrong_intent(monkeypatc
     state = {"messages": [HumanMessage(
                 content="báo giá chiết khấu cho Cửa hàng ABC, 5 Tủ gỗ")],
             "intent": "erp_read"}
-    assert _route_by_intent(state) == "skill_extract"
+    assert _route_by_intent(state) == "skill_agentic_discount_quote"
 
 
 def test_agentic_context_sync_registered_and_edges_to_end():

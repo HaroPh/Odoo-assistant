@@ -15,9 +15,8 @@ from .fusion import make_fusion_node
 from .write_registry import WRITE_COORDINATORS, COORDINATED_TOOLS
 from .continuation import make_write_continuation_node, _route_after_continuation
 from .models import llms_from_single
-from .skills import SKILLS, match_skill, make_skill_extract_node, route_after_skill_extract
-from .skills import _fold
 from . import skill_gate
+from .skill_gate import _fold
 from .agentic_registry import AGENTIC_SKILLS, AGENTIC_RECURSION_LIMIT
 from .agentic_context_sync import make_agentic_context_sync_node
 
@@ -61,8 +60,6 @@ def _route_by_intent(state: ERPAgentState) -> str:
             for spec in AGENTIC_SKILLS.values():
                 if any(kw in folded for kw in spec.triggers):
                     return spec.node
-            if match_skill(last_human):
-                return "skill_extract"
     return state.get("intent") or "unknown"
 
 
@@ -94,10 +91,6 @@ def build_graph(llm, tools, checkpointer) -> object:
     for spec in WRITE_COORDINATORS.values():
         g.add_node(spec.node, spec.build(llms["planner"], tools))
     g.add_node("write_continuation", make_write_continuation_node())
-    g.add_node("skill_extract", make_skill_extract_node(llms["planner"]))
-    for spec in SKILLS.values():
-        g.add_node(spec.node, spec.build(tools))
-        g.add_edge(spec.node, END)
     for spec in AGENTIC_SKILLS.values():
         # with_config tại wiring (không trong make_node): spike v10 chứng
         # minh binding giữ nguyên interrupt/resume; spike v10b chứng minh
@@ -117,13 +110,9 @@ def build_graph(llm, tools, checkpointer) -> object:
         "rag": "rag",
         "mixed": "mixed",
         "unknown": "respond_unknown",
-        "skill_extract": "skill_extract",
     }
     intent_targets.update({spec.node: spec.node for spec in AGENTIC_SKILLS.values()})
     g.add_conditional_edges("intent_router", _route_by_intent, intent_targets)
-    skill_targets = {END: END}
-    skill_targets.update({spec.node: spec.node for spec in SKILLS.values()})
-    g.add_conditional_edges("skill_extract", route_after_skill_extract, skill_targets)
 
     g.add_edge("erp_read", END)
     write_targets = {END: END, "erp_write_executor": "erp_write_executor"}
