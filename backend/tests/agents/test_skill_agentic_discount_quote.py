@@ -255,3 +255,90 @@ async def test_gated_tool_mcp_error_returns_text(monkeypatch):
                  [{"id": 552, "name": "Tủ", "score": 1}])
     res = await _gated([_fake_create({}, raise_exc=ValueError("write-mode tắt"))]).ainvoke(_ARGS)
     assert res.startswith("Lỗi khi tạo báo giá:")
+
+
+# ── E2E qua build_graph THẬT ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_discount_skill_e2e_confirm_gate_and_working_context(monkeypatch):
+    # E2E xuyên cả 3 commit của đợt này qua build_graph THẬT với skill build
+    # THẬT (không thay spec.build): trigger → _route_by_intent vào node
+    # agentic → model script gọi create_discount_quote → tool resolve + tính
+    # 7% TRONG CODE → interrupt confirm (question phải chứa "7%") → resume
+    # True → fake MCP create_quotation trả ĐÚNG shape list-content-block →
+    # agentic_context_sync set working_context. Khác e2e Đợt 2 (fake tool
+    # bypass gate — Minor của final review đợt đó): test này đi xuyên
+    # _confirm_write thật + resume thật.
+    import json as _json
+    from pydantic import PrivateAttr
+    from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.outputs import ChatResult, ChatGeneration
+    from langchain_core.messages import AIMessage, HumanMessage
+    from langgraph.checkpoint.memory import MemorySaver
+    from langgraph.types import Command
+    import backend.src.agents.graph as graph_mod
+
+    _patch_reads(monkeypatch, [{"id": 41, "name": "Azur", "score": 1}],
+                 [{"id": 552, "name": "Tủ", "score": 1}])
+
+    envelope = _json.dumps({"ok": True, "ref": "S00099", "model": "sale.order",
+                            "res_id": 5, "state": "draft",
+                            "display": "Đã tạo báo giá S00099 (nháp) cho Azur (1 dòng)."},
+                           ensure_ascii=False)
+    rec = {}
+    fake_mcp = MagicMock()
+    fake_mcp.name = "create_quotation"
+
+    async def _ainvoke(args):
+        rec["args"] = args
+        return [{"type": "text", "text": envelope}]
+    fake_mcp.ainvoke = _ainvoke
+
+    class _RouterAndSkillModel(BaseChatModel):
+        _step: list = PrivateAttr(default_factory=lambda: [0])
+
+        @property
+        def _llm_type(self) -> str:
+            return "routerdiscount"
+
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
+            sys_text = messages[0].content if messages else ""
+            if "erp_read" in sys_text and "erp_write" in sys_text:
+                return ChatResult(generations=[ChatGeneration(
+                    message=AIMessage(content="erp_write"))])
+            i = self._step[0]
+            self._step[0] += 1
+            steps = [
+                AIMessage(content="", tool_calls=[
+                    {"name": "create_discount_quote",
+                     "args": {"customer": "Azur",
+                              "lines": [{"product": "Tủ", "qty": 2}],
+                              "tier": "than_thiet"},
+                     "id": "c1"}]),
+                AIMessage(content="Đã tạo báo giá S00099 (nháp) cho Azur (1 dòng)."),
+            ]
+            return ChatResult(generations=[ChatGeneration(message=steps[i])])
+
+    model = _RouterAndSkillModel()
+    monkeypatch.delenv("ERP_SKILLS_ENABLED", raising=False)  # default ON
+
+    graph = graph_mod.build_graph(model, tools=[fake_mcp],
+                                  checkpointer=MemorySaver())
+    cfg = {"configurable": {"thread_id": "e2e-discount"}}
+
+    res = await graph.ainvoke({"messages": [
+        HumanMessage(content="báo giá chiết khấu cho Azur, 2 Tủ")]}, cfg)
+    itr = res["__interrupt__"][0].value
+    # 2 × 30M = 60M ≥ 50M → than_thiet 5% + bonus 2% = 7%, tính trong code.
+    assert itr["kind"] == "confirm" and "7%" in itr["question"]
+    assert "args" not in rec  # chưa ghi gì trước khi user xác nhận
+
+    res = await graph.ainvoke(Command(resume=True), cfg)
+    assert rec["args"]["partner_id"] == 41
+    assert rec["args"]["lines"][0]["price_unit"] == pytest.approx(30_000_000.0 * 0.93)
+    assert res.get("working_context") == {
+        "ref": "S00099", "model": "sale.order",
+        "display": "Đã tạo báo giá S00099 (nháp) cho Azur (1 dòng)."}

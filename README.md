@@ -90,7 +90,7 @@ behind the same safety contract:
 | Tier | When it's used | Who decides | Safety mechanism |
 |---|---|---|---|
 | **1 — Deterministic write flows** | Anything describable as one tool call plus one confirmation ("confirm order S00012", "set stock to 40"), plus linear chains between them | The LLM only classifies intent and extracts arguments; deterministic coordinators own entity resolution, draft rendering, and sequencing | Confirmation interrupt before every write; fail-closed write toggle at the MCP layer |
-| **2 — Agentic SOP skills** | Multi-step warehouse procedures with conditional branching and free-form human input (goods receiving with quantity/QC checks, delivery) | A ReAct agent (a LangGraph `create_agent` node) drives the conversation and the tool sequence | The agent never holds a raw write tool — only same-named wrappers that park on a confirmation interrupt; a literal `True` resume is the only path to the real call |
+| **2 — Agentic SOP skills** | Multi-step SOP procedures with conditional branching and free-form human input (goods receiving with quantity/QC checks, delivery, tiered discount quoting — the discount percentage is computed in code, never by the model) | A ReAct agent (a LangGraph `create_agent` node) drives the conversation and the tool sequence | The agent never holds a raw write tool — only same-named wrappers that park on a confirmation interrupt; a literal `True` resume is the only path to the real call |
 
 The litmus test is bidirectional: an SOP that turns out to be linear moves
 down to tier 1; a tier-1 action that grows business conditions moves up to
@@ -102,9 +102,11 @@ A third style (per-SOP deterministic coordinators with a dedicated
 extraction call) was built first, A/B-tested against the agentic version
 on a local 8-9B model — 34 live runs plus adversarial probes: pressure to
 skip confirmation, deliberately messy replies, decimal-quantity traps —
-and is being retired: once the confirm gate moved into code, the agentic
-tier matched it on safety and beat it on tolerance to natural, messy
-input.
+and has since been retired: once the confirm gate moved into code, the
+agentic tier matched it on safety and beat it on tolerance to natural,
+messy input. The last deterministic skill (tiered discount quoting) was
+migrated to the agentic pattern and the per-SOP extraction
+infrastructure (`skills.py`, the `skill_extract` node) deleted with it.
 
 ### Known sharp edges — found via live-verify
 
