@@ -7,7 +7,6 @@ docs/superpowers/specs/2026-07-15-sop-skill-pilot-design.md §4.3-§4.4.
 Import direction is one-way: this module imports the skill modules; the
 skill modules never import this one (avoids a partial-init cycle)."""
 
-import unicodedata
 from dataclasses import dataclass
 from typing import Callable
 
@@ -15,6 +14,7 @@ from langchain_core.messages import AIMessage
 from langgraph.graph import END
 
 from .nodes import _plan_json
+from .skill_gate import _fold
 from . import skill_discount_quote
 
 
@@ -32,20 +32,6 @@ SKILLS = {
         "skill_discount_quote", skill_discount_quote.TRIGGERS,
         skill_discount_quote.EXTRACT_PROMPT, skill_discount_quote.make_node),
 }
-
-
-_EXTRA_FOLD = str.maketrans("đĐ", "dD")
-
-
-def _fold(s: str) -> str:
-    # đ/Đ (U+0111/U+0110) are standalone Vietnamese letters with no NFD
-    # decomposition — combining-mark stripping alone leaves them untouched,
-    # unlike vowels with tone/horn marks (á, ơ...). Explicit translate closes
-    # that gap (found 2026-07-16: a trigger phrase containing "đơn" silently
-    # failed to match naturally-typed diacritic input).
-    nfd = unicodedata.normalize("NFD", (s or "").lower())
-    stripped = "".join(ch for ch in nfd if not unicodedata.combining(ch))
-    return stripped.translate(_EXTRA_FOLD)
 
 
 def match_skill(text: str) -> str | None:

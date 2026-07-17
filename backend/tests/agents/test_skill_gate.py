@@ -28,3 +28,23 @@ def test_garbage_value_is_on(monkeypatch):
     # semantics means any value other than the documented "0" enables.
     monkeypatch.setenv("ERP_SKILLS_ENABLED", "true")
     assert skill_gate.skills_enabled() is True
+
+
+def test_fold_lowercases_and_strips_diacritics():
+    from backend.src.agents.skill_gate import _fold
+    assert _fold("BÁO GIÁ Chiết Khấu") == "bao gia chiet khau"
+    assert _fold("") == ""
+    assert _fold(None) == ""
+
+
+def test_fold_strips_dd_stroke_letter():
+    # Regression (found 2026-07-16 via feat/agentic-delivery's wiring
+    # tests): đ/Đ have no NFD decomposition (unlike á/ơ/ậ...), so plain
+    # combining-mark stripping used to leave them untouched — a trigger
+    # phrase containing "đơn" silently failed to match naturally-typed
+    # diacritic input ("giao hàng cho đơn bán" folded to "...đon ban...",
+    # not "...don ban...").
+    from backend.src.agents.skill_gate import _fold
+    assert _fold("đơn hàng") == "don hang"
+    assert _fold("Đơn Hàng") == "don hang"
+    assert _fold("giao hàng cho đơn bán") == "giao hang cho don ban"
