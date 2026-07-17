@@ -62,6 +62,23 @@ def test_drive_conversation_discount_style_confirm_marker(monkeypatch):
     assert result.completed is True and result.turns == 2
 
 
+def test_drive_conversation_ignores_clarification_containing_confirm_word(monkeypatch):
+    # Regression: Task 2 live-run (e2e-skill-discount, 2026-07-17) found this
+    # exact real assistant reply treated as a false-positive confirm-gate —
+    # "xác nhận" used as an ordinary verb mid-sentence in a product-name
+    # clarification question, with NO "?" anywhere in the message. Must NOT
+    # be treated as the real money-confirm gate.
+    clarification = ("Có vẻ tên sản phẩm 'Large Cabinet' vẫn bị trùng. Vui lòng "
+                     "xác nhận chính xác tên sản phẩm (ví dụ: [E-COM07] Large "
+                     "Cabinet) hoặc cung cấp mã sản phẩm để chúng tôi tìm đúng "
+                     "sản phẩm cần báo giá.")
+    monkeypatch.setattr(lvc, "chat", lambda h, s, m: clarification)
+    result = lvc.drive_conversation(
+        [], "sid", "mở đầu", responders=[], final_answer="có", max_turns=2)
+    assert result.completed is False
+    assert result.turns == 1
+
+
 def test_drive_fixed_turns_returns_all_answers_in_order(monkeypatch):
     script = iter(["đáp 1", "đáp 2", "đáp 3"])
     monkeypatch.setattr(lvc, "chat", lambda h, s, m: next(script))

@@ -70,6 +70,19 @@ class DriveResult:
     all_answers: list[str] = field(default_factory=list)
 
 
+def _looks_like_confirm_gate(low: str, confirm_markers: tuple[str, ...]) -> bool:
+    # Task 2 live-run (e2e-skill-discount, 2026-07-17) found a false positive:
+    # a product-disambiguation clarification ("...Vui lòng xác nhận chính xác
+    # tên sản phẩm...") contains "xác nhận" as an ordinary verb, mid-sentence,
+    # with no "?" anywhere — NOT the real money-confirm gate. Every real
+    # confirm-gate question in this codebase (agentic_gate._confirm_write's
+    # callers, create_order.render_draft) ends in "?" (either "...cho đơn mua
+    # P00021?" or "...Xác nhận? (có / không)"); ordinary clarification prose
+    # in this codebase does not. Requiring "?" alongside the marker closes
+    # this specific, real, evidence-based gap without needing an LLM-judge.
+    return any(marker in low for marker in confirm_markers) and "?" in low
+
+
 def drive_conversation(history: list[dict], sid: str, opening_msg: str,
                        responders: list[tuple], final_answer: str,
                        confirm_markers: tuple[str, ...] = ("xác nhận",),
@@ -77,16 +90,17 @@ def drive_conversation(history: list[dict], sid: str, opening_msg: str,
     """Lái hội thoại đa lượt chịu được model trôi tham số (Đợt 3 tier2-retirement
     live-verify). responders: [(predicate: str->bool, reply: str), ...] xét theo
     thứ tự trên câu trả lời agent (lowercase) tới khi khớp; reply được gửi lại.
-    Khi câu trả lời chứa 1 trong confirm_markers → gửi final_answer, DỪNG (dùng
-    HÀM NÀY CHO CẢ happy-path lẫn refusal — chỉ khác final_answer truyền vào).
-    Không câu nào khớp → dừng, completed=False. all_answers tích luỹ MỌI câu trả
-    lời agent trong phiên (kể cả khi completed=False)."""
+    Khi câu trả lời chứa 1 trong confirm_markers VÀ có "?" (xem
+    _looks_like_confirm_gate) → gửi final_answer, DỪNG (dùng HÀM NÀY CHO CẢ
+    happy-path lẫn refusal — chỉ khác final_answer truyền vào). Không câu nào
+    khớp → dừng, completed=False. all_answers tích luỹ MỌI câu trả lời agent
+    trong phiên (kể cả khi completed=False)."""
     ans = chat(history, sid, opening_msg)
     all_answers = [ans]
     turns = 1
     while turns < max_turns:
         low = ans.lower()
-        if any(marker in low for marker in confirm_markers):
+        if _looks_like_confirm_gate(low, confirm_markers):
             ans = chat(history, sid, final_answer)
             all_answers.append(ans)
             return DriveResult(ans, turns + 1, True, all_answers)

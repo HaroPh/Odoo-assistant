@@ -17,10 +17,19 @@ PRODUCT_ID = 20
 UNIT_PRICE = 320.0
 
 # Model đôi khi mất 1-2 lượt để resolve đúng tên sản phẩm (Đợt 3 finding) —
-# responder này lặp lại tên sản phẩm khi gặp đúng dạng câu hỏi disambiguation.
+# responder trả lời TÊN CÓ MÃ ([E-COM07] Large Cabinet), không phải tên trần
+# ("Large Cabinet"). Task 2 live-run 2026-07-17 tìm ra bare-name lặp lại vô
+# hạn không tự giải quyết được ambiguity (model đôi khi truy vấn ref khác
+# "Large Cabinet" — ref rộng/suy biến kích hoạt nhánh ambiguous rộng hơn của
+# find_product — xem inventory.find_product, không đổi ở đợt này); tên có mã
+# khớp CHÍNH XÁC candidate.name mà find_product trả về (đã verify trực tiếp
+# qua XML-RPC: find_product("Large Cabinet") tự nó resolve sạch, không mơ
+# hồ — vấn đề chỉ phát sinh khi model gửi ref khác), đúng định dạng mà chính
+# assistant đề nghị trong câu hỏi làm rõ thật ("...vui lòng xác nhận chính
+# xác tên sản phẩm (ví dụ: [E-COM07] Large Cabinet)...").
 _PRODUCT_RESPONDERS = [
     (lambda low: "chọn" in low and ("sản phẩm" in low or "danh sách sau" in low),
-     "Large Cabinet"),
+     "[E-COM07] Large Cabinet"),
 ]
 
 
@@ -87,6 +96,7 @@ def scenario_refusal(odoo) -> Scenario:
 
 def scenario_strategic_tier(odoo) -> Scenario:
     history, sid = [], "live-verify-discount-strategic-" + uuid.uuid4().hex[:8]
+    before = _count_draft_quotations(odoo)
     result = drive_conversation(
         history, sid,
         opening_msg=("báo giá chiết khấu cho Azure Interior, 2 Large Cabinet, "
@@ -95,6 +105,10 @@ def scenario_strategic_tier(odoo) -> Scenario:
     if not result.completed:
         return Scenario("strategic_tier", False, result.turns,
                         f"không hoàn thành sau {result.turns} lượt")
+    after = _count_draft_quotations(odoo)
+    if after != before + 1:
+        return Scenario("strategic_tier", False, result.turns,
+                        f"số quotation draft {before}->{after}, kỳ vọng +1")
     price = _newest_draft_price_unit(odoo)
     expected = round(UNIT_PRICE * 0.90, 2)
     if price is None or abs(price - expected) > 0.01:
