@@ -131,3 +131,69 @@ async def test_empty_or_missing_messages_never_raises():
     node = make_agentic_context_sync_node()
     assert await node({"messages": []}) == {}
     assert await node({}) == {}
+
+
+@pytest.mark.asyncio
+async def test_scrub_uses_write_display_when_write_succeeded_this_turn():
+    # Hazard found during design review: if a write actually succeeded this
+    # turn, the generic "there was a problem" fallback would be a LIE. Must
+    # reuse the tool's own confirmation text (working_context["display"])
+    # instead.
+    node = make_agentic_context_sync_node()
+    final = AIMessage(id="ai-final", content="Không thể dùng receive_order vì thiếu mã đơn.")
+    state = {"messages": [
+        HumanMessage(content="nhập kho P00021"),
+        ToolMessage(content=_env(), tool_call_id="c1"),
+        final,
+    ]}
+    upd = await node(state)
+    assert upd["working_context"] == {
+        "ref": "P00021", "model": "purchase.order",
+        "display": "Đã nhận hàng cho đơn mua P00021."}
+    assert len(upd["messages"]) == 1
+    assert upd["messages"][0].id == "ai-final"
+    assert upd["messages"][0].content == "Đã nhận hàng cho đơn mua P00021."
+
+
+@pytest.mark.asyncio
+async def test_scrub_uses_generic_fallback_when_no_write_this_turn():
+    from backend.src.agents.tool_leak_guard import TOOL_LEAK_FALLBACK_MSG
+    node = make_agentic_context_sync_node()
+    final = AIMessage(id="ai-final",
+                      content="Không dùng flag_order_for_review vì không có đơn.")
+    state = {"messages": [
+        HumanMessage(content="nhập kho không có PO"),
+        final,
+    ]}
+    upd = await node(state)
+    assert "working_context" not in upd
+    assert upd["messages"][0].id == "ai-final"
+    assert upd["messages"][0].content == TOOL_LEAK_FALLBACK_MSG
+
+
+@pytest.mark.asyncio
+async def test_clean_final_message_is_not_scrubbed():
+    node = make_agentic_context_sync_node()
+    state = {"messages": [
+        HumanMessage(content="nhập kho không có PO"),
+        AIMessage(id="ai-final", content="Bạn cần cung cấp mã đơn mua."),
+    ]}
+    upd = await node(state)
+    assert "messages" not in upd
+
+
+@pytest.mark.asyncio
+async def test_leak_in_non_final_message_is_not_scrubbed():
+    # A leak in an intermediate AI message (one carrying tool_calls, which
+    # the user never sees) must not trigger scrubbing — only messages[-1]
+    # is what erp_agent.chat() actually returns to the user.
+    node = make_agentic_context_sync_node()
+    state = {"messages": [
+        HumanMessage(content="nhập kho P00021"),
+        AIMessage(content="gọi receive_order ngay"),
+        ToolMessage(content=_env(), tool_call_id="c1"),
+        AIMessage(id="ai-final", content="Đã nhận hàng xong."),
+    ]}
+    upd = await node(state)
+    assert "messages" not in upd
+    assert upd["working_context"]["ref"] == "P00021"
