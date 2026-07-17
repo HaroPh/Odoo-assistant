@@ -12,6 +12,7 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 from backend.src.erp_query.transport import XmlRpcTransport
+from backend.src.agents.tool_leak_guard import TOOL_NAME_LEAK_MARKERS, has_tool_leak  # noqa: F401
 
 BASE_URL = "http://localhost:8000"
 CHAT_ENDPOINT = f"{BASE_URL}/v1/chat/completions"
@@ -46,20 +47,6 @@ def chat(history: list[dict], sid: str, msg: str) -> str:
     answer = r.json()["choices"][0]["message"]["content"]
     history.append({"role": "assistant", "content": answer})
     return answer
-
-
-# Cùng tinh thần HALLUCINATION_MARKERS (backend/evals/cases.py) — nhưng bắt việc
-# lộ tên tool thô ra user thay vì bịa hành động.
-TOOL_NAME_LEAK_MARKERS = (
-    "receive_order", "flag_order_for_review", "deliver_order",
-    "create_discount_quote", "get_purchase_order_detail",
-    "get_sale_order_detail", "ask_human(",
-)
-
-
-def has_tool_leak(text: str) -> list[str]:
-    low = text.lower()
-    return [m for m in TOOL_NAME_LEAK_MARKERS if m.lower() in low]
 
 
 @dataclass
