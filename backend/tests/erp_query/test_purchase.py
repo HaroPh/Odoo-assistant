@@ -91,10 +91,17 @@ def test_get_product_suppliers_declared_and_history():
         ("purchase.order.line", "search_read"): [
             {"partner_id": [11, "Ready Mat"]}, {"partner_id": [10, "Gemini Furniture"]}],
     })
-    out = purchase.get_product_suppliers("Large Cabinet", gw=Gateway(t))
+    gw = Gateway(t)
+    out = purchase.get_product_suppliers("Large Cabinet", gw=gw)
     assert out["status"] == "success"
     assert out["data"]["history_partners"] == ["Ready Mat", "Gemini Furniture"]
     assert "Ready Mat" in out["display"] and "785" in out["display"]
+    # Lock in the real bug this suite exists to catch: product.supplierinfo has no
+    # usable product_id on this Odoo instance (verified False on every live record) —
+    # the query MUST filter by product_tmpl_id (11, from the mocked product.product
+    # row), not by product_id (20).
+    supplierinfo_call = next(c for c in gw._t.calls if c[0] == "product.supplierinfo")
+    assert supplierinfo_call[2][0] == [["product_tmpl_id", "=", 11]]
 
 
 def test_get_product_suppliers_no_declared_no_history():
