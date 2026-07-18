@@ -81,6 +81,24 @@ def build_erp_query_tools() -> list:
         return _json(purchase.get_purchase_order_detail(ref))
 
     @tool
+    def list_suppliers() -> str:
+        """Liệt kê nhà cung cấp hiện có. Dùng khi hỏi 'có các vendor nào' mà
+        KHÔNG nêu tên cụ thể."""
+        return _json(purchase.list_suppliers())
+
+    @tool
+    def get_product_suppliers(product: str) -> str:
+        """Nhà cung cấp của MỘT SẢN PHẨM (khai báo bảng giá + đã nhập thật
+        theo đơn mua). Nhận tên hoặc mã sản phẩm."""
+        return _json(purchase.get_product_suppliers(product))
+
+    @tool
+    def get_supplier_detail(name: str) -> str:
+        """Hồ sơ chi tiết MỘT nhà cung cấp: liên hệ, thuế, ngân hàng, số đơn
+        mua."""
+        return _json(purchase.get_supplier_detail(name))
+
+    @tool
     def list_invoices(move_type: str, partner: str = "", payment_state: str = "") -> str:
         """Hóa đơn đã phát hành; move_type = out_invoice (bán) | in_invoice (mua);
         partner lọc theo tên (chuỗi con, KHÔNG dùng ID)."""
@@ -94,4 +112,5 @@ def build_erp_query_tools() -> list:
     return [find_customer, find_supplier, find_product, list_sale_orders,
             get_sale_order_detail, get_product_price, sales_summary, top_products,
             get_stock, get_lots, list_purchase_orders, get_purchase_order_detail,
+            list_suppliers, get_product_suppliers, get_supplier_detail,
             list_invoices, get_overdue_invoices]

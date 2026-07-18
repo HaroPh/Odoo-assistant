@@ -18,3 +18,9 @@ def test_tool_returns_envelope_json(monkeypatch):
     tool = next(t for t in build_erp_query_tools() if t.name == "get_stock")
     out = json.loads(tool.invoke({"product": "Tủ"}))
     assert out["status"] == "success" and out["display"] == "trống"
+
+
+def test_build_tools_exposes_vendor_read_tools():
+    names = {t.name for t in build_erp_query_tools()}
+    assert {"list_suppliers", "get_product_suppliers",
+            "get_supplier_detail"} <= names

@@ -52,3 +52,115 @@ def get_purchase_order_detail(ref, *, gw=None):
     return ok({"order": o, "lines": lines},
               f"Đơn mua {o['name']} | {(o['partner_id'] or [0, 'N/A'])[1]} "
               f"| Tổng {o['amount_total']:,.0f}\n{body}")
+
+
+def list_suppliers(limit=50, *, gw=None):
+    gw = gw or default_gateway()
+    try:
+        rows = gw.search_read("res.partner", [["supplier_rank", ">", 0]],
+                              ["name", "email", "phone", "city"],
+                              order="name asc", limit=limit)
+    except Exception as e:                                  # noqa: BLE001
+        return err(f"Lỗi tra cứu nhà cung cấp: {e}")
+    if not rows:
+        return ok({"rows": [], "count": 0}, "Chưa có nhà cung cấp nào trong hệ thống.")
+    lines = [f"{r['name']} | {r['email'] or '—'} | {r['phone'] or '—'}" for r in rows]
+    return ok({"rows": rows, "count": len(rows)},
+              f"{len(rows)} nhà cung cấp:\n" + "\n".join(lines))
+
+
+def _resolve_single(model, query, gw):
+    """resolve_entity envelope -> (row_with_id_and_name, None) | (None, error_msg).
+    Cùng logic với resolve_entity_for_order (backend/src/agents/create_order.py)
+    nhưng viết lại tại đây — erp_query KHÔNG import từ backend/src/agents (chiều
+    phụ thuộc ngược lại: agents phụ thuộc erp_query)."""
+    env = resolve_entity(model, query, gw=gw)
+    if env.get("status") != "success":
+        return None, env.get("display") or "Lỗi tra cứu."
+    data = env.get("data") or {}
+    matches = data.get("matches") or []
+    if not matches:
+        return None, f"Không tìm thấy '{query}'."
+    if data.get("needs_disambiguation"):
+        names = "; ".join(f"{m['name']} (ID {m['id']})" for m in matches)
+        return None, f"Có nhiều kết quả cho '{query}': {names}."
+    exact = [m for m in matches if (m["name"] or "").strip().lower() == query.strip().lower()]
+    chosen = exact[0] if exact else matches[0]
+    return {"id": chosen["id"], "name": chosen["name"]}, None
+
+
+def get_product_suppliers(product, *, gw=None):
+    gw = gw or default_gateway()
+    prod, msg = _resolve_single("product.product", product, gw)
+    if msg:
+        return err(msg)
+    try:
+        tmpl_rows = gw.search_read("product.product", [["id", "=", prod["id"]]],
+                                   ["product_tmpl_id"], limit=1)
+        tmpl_id = (tmpl_rows[0]["product_tmpl_id"][0]
+                  if tmpl_rows and tmpl_rows[0].get("product_tmpl_id") else None)
+        declared = []
+        if tmpl_id:
+            declared = gw.search_read("product.supplierinfo",
+                                      [["product_tmpl_id", "=", tmpl_id]],
+                                      ["partner_id", "price", "min_qty", "delay"],
+                                      order="price asc", limit=20)
+        history = gw.search_read("purchase.order.line",
+                                 [["product_id", "=", prod["id"]],
+                                  ["state", "in", ["purchase", "done"]]],
+                                 ["partner_id"], limit=50)
+    except Exception as e:                                  # noqa: BLE001
+        return err(f"Lỗi tra cứu nhà cung cấp của sản phẩm: {e}")
+    seen = set()
+    history_partners = []
+    for h in history:
+        pid = h.get("partner_id")
+        if pid and pid[0] not in seen:
+            seen.add(pid[0])
+            history_partners.append(pid[1])
+    body = [f"Nhà cung cấp của {prod['name']}:"]
+    if declared:
+        body.append("NCC khai báo (bảng giá):")
+        body += [f"  {d['partner_id'][1] if d['partner_id'] else '?'} — "
+                f"{d['price']:,.0f}đ/đv, tối thiểu {d['min_qty']:g}, "
+                f"giao trong {d['delay']} ngày" for d in declared]
+    else:
+        body.append("NCC khai báo (bảng giá): chưa có.")
+    if history_partners:
+        body.append("NCC đã nhập (theo đơn mua): " + ", ".join(history_partners))
+    else:
+        body.append("NCC đã nhập (theo đơn mua): chưa từng nhập.")
+    return ok({"product": prod, "declared": declared,
+              "history_partners": history_partners}, "\n".join(body))
+
+
+def get_supplier_detail(name, *, gw=None):
+    gw = gw or default_gateway()
+    sup, msg = _resolve_single("res.partner", name, gw)
+    if msg:
+        return err(msg)
+    try:
+        rows = gw.search_read("res.partner", [["id", "=", sup["id"]]],
+                              ["name", "email", "phone", "vat", "street", "city",
+                               "bank_ids", "property_supplier_payment_term_id"],
+                              limit=1)
+        p = rows[0]
+        banks = []
+        if p.get("bank_ids"):
+            banks = gw.search_read("res.partner.bank", [["id", "in", p["bank_ids"]]],
+                                   ["acc_number", "bank_id"], limit=10)
+        pos = gw.search_read("purchase.order", [["partner_id", "=", sup["id"]]],
+                             ["id"], limit=100)
+    except Exception as e:                                  # noqa: BLE001
+        return err(f"Lỗi tra cứu hồ sơ nhà cung cấp: {e}")
+    bank_txt = "; ".join(f"{b['acc_number']} ({b['bank_id'][1] if b['bank_id'] else '?'})"
+                         for b in banks) or "—"
+    term = p.get("property_supplier_payment_term_id")
+    display = (f"Nhà cung cấp: {p['name']}\n"
+              f"  Email: {p['email'] or '—'} | Điện thoại: {p['phone'] or '—'}\n"
+              f"  Mã số thuế: {p['vat'] or '—'}\n"
+              f"  Địa chỉ: {p['street'] or '—'}, {p['city'] or '—'}\n"
+              f"  Ngân hàng: {bank_txt}\n"
+              f"  Điều khoản thanh toán: {term[1] if term else '—'}\n"
+              f"  Số đơn mua đã có: {len(pos)}")
+    return ok({"partner": p, "bank_accounts": banks, "po_count": len(pos)}, display)
