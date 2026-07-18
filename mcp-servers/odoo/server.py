@@ -865,6 +865,123 @@ def inventory_adjustment(new_qty: float, product_name: str = "",
             f"{old:g} → {now:g}.")
 
 
+@mcp.tool()
+def register_payment(invoice_id: int = 0, invoice_ref: str = "",
+                     partner_name: str = "", amount: float | None = None,
+                     invoice_date: str | None = None, journal: str = "") -> str:
+    """Ghi nhận thanh toán cho một hóa đơn ĐÃ PHÁT HÀNH (khách trả tiền hóa đơn
+    bán, hoặc mình trả tiền hóa đơn mua NCC). Luôn thanh toán ĐỦ số dư còn lại
+    của hóa đơn — amount/invoice_date chỉ dùng để CHỌN đúng hóa đơn khi trùng,
+    KHÔNG phải số tiền thanh toán một phần.
+    YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        invoice_id: ID hóa đơn đã biết (ưu tiên cao nhất — đường nội bộ/chain).
+        invoice_ref: Số hóa đơn đã phát hành (vd "INV/2026/00016", "BILL/...").
+        partner_name: Tên khách/NCC (tìm gần đúng) khi không biết số hóa đơn.
+        amount: Tổng tiền hóa đơn — CHỈ để phân biệt khi có nhiều hóa đơn.
+        invoice_date: Ngày hóa đơn (YYYY-MM-DD) — CHỈ để phân biệt.
+        journal: "bank" | "cash" — sổ nhận/chi tiền. Bỏ trống = hệ thống tự chọn.
+    """
+    try:
+        fields = ["id", "name", "state", "payment_state", "amount_residual",
+                  "partner_id"]
+        if invoice_id:
+            rows = odoo("account.move", "search_read",
+                       [[["id", "=", invoice_id],
+                         ["move_type", "in", ["out_invoice", "in_invoice"]]]],
+                       {"fields": fields, "limit": 1})
+            if not rows:
+                return envelope(False, f"Không tìm thấy hóa đơn ID {invoice_id}.")
+            mv = rows[0]
+        elif invoice_ref:
+            rows = odoo("account.move", "search_read",
+                       [[["name", "=", invoice_ref],
+                         ["move_type", "in", ["out_invoice", "in_invoice"]]]],
+                       {"fields": fields, "limit": 2})
+            if not rows:
+                return envelope(False, f"Không tìm thấy hóa đơn '{invoice_ref}'.")
+            if len(rows) > 1:
+                return envelope(False, f"Có nhiều hóa đơn tên '{invoice_ref}'.")
+            mv = rows[0]
+        elif partner_name:
+            domain = [["move_type", "in", ["out_invoice", "in_invoice"]],
+                     ["state", "=", "posted"],
+                     ["payment_state", "in", ["not_paid", "partial"]],
+                     ["partner_id.name", "ilike", partner_name]]
+            if amount is not None:
+                domain.append(["amount_residual", "=", amount])
+            if invoice_date:
+                domain.append(["invoice_date", "=", invoice_date])
+            rows = odoo("account.move", "search_read", [domain],
+                       {"fields": fields, "limit": 6})
+            row, msg = resolve_unique(
+                rows, "hóa đơn",
+                describe=lambda r: (
+                    f"{r['name']} — {r['partner_id'][1] if r['partner_id'] else '?'} "
+                    f"— còn {r['amount_residual']:,.0f}đ"),
+                hint="Vui lòng nêu rõ số hóa đơn, số tiền hoặc ngày.")
+            if msg:
+                return envelope(False, msg)
+            mv = row
+        else:
+            return envelope(False,
+                            "Vui lòng cho biết số hóa đơn hoặc tên khách/NCC.")
+
+        if mv["state"] != "posted":
+            return envelope(False, f"Hóa đơn {mv['name']} chưa phát hành. "
+                                   f"Hãy phát hành hóa đơn trước.")
+        if mv["payment_state"] == "paid":
+            return envelope(False, f"Hóa đơn {mv['name']} đã thanh toán đủ rồi.")
+        if mv["payment_state"] == "reversed":
+            return envelope(False, f"Hóa đơn {mv['name']} đã bị đảo, "
+                                   f"không thể ghi nhận thanh toán.")
+
+        move_id = mv["id"]
+        partner = mv["partner_id"][1] if mv["partner_id"] else "?"
+
+        journal_vals = {}
+        if journal:
+            jtype = journal.strip().lower()
+            if jtype not in ("bank", "cash"):
+                return envelope(False, f"Loại sổ '{journal}' không hợp lệ. "
+                                       f"Chỉ nhận 'bank' hoặc 'cash'.")
+            jrows = odoo("account.journal", "search", [[["type", "=", jtype]]],
+                        {"limit": 1, "order": "id asc"})
+            if not jrows:
+                return envelope(False, f"Không tìm thấy sổ loại '{jtype}'.")
+            journal_vals["journal_id"] = jrows[0]
+
+        # action_register_payment tự tính active_ids là các move-line receivable/
+        # payable thật (KHÔNG phải move id) — dùng context này VERBATIM, đã verify
+        # trên Odoo 19 thật (không tự dựng context tay).
+        action = odoo("account.move", "action_register_payment", [[move_id]])
+        ctx = action["context"]
+
+        wiz_id = odoo("account.payment.register", "create", [journal_vals],
+                      {"context": ctx})
+        wiz = odoo("account.payment.register", "read", [[wiz_id]],
+                  {"fields": ["amount", "journal_id"]})[0]
+
+        odoo("account.payment.register", "action_create_payments", [[wiz_id]],
+            {"context": ctx})
+
+        after = odoo("account.move", "read", [[move_id]],
+                    {"fields": ["name", "payment_state"]})[0]
+        state_label = {"paid": "Đã thanh toán đủ.",
+                      "in_payment": "Đã ghi nhận, chờ đối soát ngân hàng.",
+                      "partial": "Đã thanh toán một phần."}.get(
+            after["payment_state"], "")
+        journal_name = wiz["journal_id"][1] if wiz["journal_id"] else "?"
+        return envelope(True,
+            f"Đã ghi nhận thanh toán {wiz['amount']:,.0f}đ cho hóa đơn "
+            f"{after['name']} ({partner}) qua sổ {journal_name}. {state_label}",
+            ref=after["name"], model="account.move", res_id=move_id,
+            state=after["payment_state"])
+    except Exception as e:  # noqa: BLE001 — never raise through the MCP tool
+        return envelope(False, f"Lỗi khi ghi nhận thanh toán: {e}")
+
+
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

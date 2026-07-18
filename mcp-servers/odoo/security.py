@@ -22,6 +22,8 @@ ODOO_METHOD_OPERATION_MAP = {
     "action_post": "write",
     "button_validate": "write",
     "action_apply_inventory": "write",
+    "action_register_payment": "write",
+    "action_create_payments": "write",
     # UNLINK — Phase 3: cần confirmation + cảnh báo
     "unlink": "unlink", "action_delete": "unlink",
 }

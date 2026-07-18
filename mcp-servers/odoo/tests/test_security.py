@@ -39,3 +39,8 @@ def test_sanitize_model_rejects_leading_trailing_whitespace():
         security.sanitize_model("  sale.order")
     with pytest.raises(ValueError):
         security.sanitize_model("account.invoice  ")
+
+
+def test_classify_register_payment_methods():
+    assert security.classify_operation("action_register_payment") == "write"
+    assert security.classify_operation("action_create_payments") == "write"
