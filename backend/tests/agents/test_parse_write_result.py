@@ -44,7 +44,7 @@ def test_non_envelope_json_is_plain_text():
 def test_next_steps_chain_is_linear_and_terminal():
     assert set(NEXT_STEPS) == {
         "create_quotation", "confirm_sale_order", "deliver_order",
-        "create_invoice_from_order",
+        "create_invoice_from_order", "post_invoice",
         "create_rfq", "confirm_purchase_order", "receive_order",
         "create_bill_from_po",
         "update_quotation_lines", "update_rfq_lines",
@@ -92,5 +92,8 @@ def test_next_steps_chain_is_linear_and_terminal():
         == ("post_invoice", "Phát hành hóa đơn")
     assert NEXT_STEPS["create_bill_from_po"].args(
         {**plw, "ref": None, "res_id": 65}) == {"invoice_id": 65}
-    # ── shared terminal ──
-    assert "post_invoice" not in NEXT_STEPS
+    # ── shared post_invoice → register_payment ──
+    assert (NEXT_STEPS["post_invoice"].tool,
+            NEXT_STEPS["post_invoice"].label) \
+        == ("register_payment", "Ghi nhận thanh toán")
+    assert NEXT_STEPS["post_invoice"].args(lw) == {"invoice_id": 42}

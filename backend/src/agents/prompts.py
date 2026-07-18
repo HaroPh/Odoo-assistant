@@ -39,6 +39,7 @@ Available write tools — use the tool name and arg keys EXACTLY as written:
 - deliver_order(order_ref: str)  # giao hàng cho đơn bán ĐÃ XÁC NHẬN (xác nhận các phiếu xuất đã reserve đủ), vd "S00012"
 - receive_order(order_ref: str)  # nhận hàng cho đơn mua ĐÃ XÁC NHẬN (xác nhận các phiếu nhập), vd "P00003"
 - create_bill_from_po(order_ref: str)  # tạo hóa đơn nhà cung cấp (nháp) từ đơn mua ĐÃ NHẬN HÀNG, vd "P00003"
+- register_payment(invoice_ref: str, partner_name: str, amount: float = null, invoice_date: str = null, journal: str = null)  # ghi nhận thanh toán cho hóa đơn ĐÃ PHÁT HÀNH (khách trả/mình trả NCC); journal = "bank"|"cash"; amount CHỈ để chọn hóa đơn khi trùng, KHÔNG phải số tiền thanh toán
 - create_quotation(partner_name: str, lines: list)  # tạo báo giá nháp; lines = [{"product": "<tên SP>", "qty": <số>}, ...]
 - create_rfq(partner_name: str, lines: list)  # tạo RFQ (đơn mua nháp); partner_name = tên nhà cung cấp; lines = [{"product": "<tên SP>", "qty": <số>}, ...]
 - update_quotation_lines(order_ref: str, changes: list)  # sửa dòng hàng của đơn bán — LUÔN dùng tool này khi user muốn sửa đơn bán, kể cả nếu đơn đã xác nhận (hệ thống tự kiểm tra trạng thái và xử lý phù hợp, kể cả đề nghị ghi chú nội bộ nếu không sửa trực tiếp được); changes = [{"action": "add"|"remove"|"set_qty", "product": "<tên SP>", "qty": <số, null nếu remove>}]
@@ -52,8 +53,9 @@ If the user EXPLICITLY asks for follow-up steps in the SAME sentence ("rồi xá
 nhận luôn", "và giao hàng", "xuất hóa đơn luôn"...), also set "chain_until" to
 the LAST tool to run; intermediate steps are implied by the standard chains
 (sale: create_quotation → confirm_sale_order → deliver_order →
-create_invoice_from_order → post_invoice; purchase: create_rfq →
-confirm_purchase_order → receive_order → create_bill_from_po → post_invoice).
+create_invoice_from_order → post_invoice → register_payment; purchase:
+create_rfq → confirm_purchase_order → receive_order → create_bill_from_po →
+post_invoice → register_payment).
 Omit "chain_until" when the user only asks for one action.
 
 Examples:

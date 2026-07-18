@@ -382,3 +382,17 @@ async def test_two_step_chain_one_confirm_end_to_end(monkeypatch):
     res = await graph.ainvoke(Command(resume=False), cfg)
     assert res["messages"][-1].content == "Đã dừng tại đây."
     assert res["auto_chain"] is None
+
+
+def test_expand_full_sale_chain_to_register_payment():
+    steps = expand_chain("create_quotation", "register_payment")
+    assert [t for t, _ in steps] == ["confirm_sale_order", "deliver_order",
+                                     "create_invoice_from_order", "post_invoice",
+                                     "register_payment"]
+
+
+def test_post_invoice_next_step_is_register_payment():
+    from backend.src.agents.write_registry import NEXT_STEPS
+    step = NEXT_STEPS["post_invoice"]
+    assert step.tool == "register_payment"
+    assert step.args({"res_id": 64}) == {"invoice_id": 64}

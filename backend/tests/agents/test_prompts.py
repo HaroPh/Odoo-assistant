@@ -72,3 +72,12 @@ def test_render_working_context_instructs_explicit_wins():
                                    "display": "x"})
     assert "đơn mua" in text
     assert "LUÔN dùng mã người dùng nêu" in text
+
+
+def test_planner_prompt_advertises_register_payment():
+    assert "register_payment(invoice_ref" in WRITE_PLANNER_PROMPT
+    assert "journal" in WRITE_PLANNER_PROMPT
+
+
+def test_planner_prompt_chain_description_ends_at_register_payment():
+    assert "post_invoice → register_payment" in WRITE_PLANNER_PROMPT

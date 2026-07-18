@@ -60,6 +60,8 @@ NEXT_STEPS = {
                                           lambda lw: {"order_ref": lw["ref"]}),
     "create_bill_from_po":       NextStep("Phát hành hóa đơn", "post_invoice",
                                           lambda lw: {"invoice_id": lw["res_id"]}),
+    "post_invoice":               NextStep("Ghi nhận thanh toán", "register_payment",
+                                          lambda lw: {"invoice_id": lw["res_id"]}),
 }
 
 
