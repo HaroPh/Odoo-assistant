@@ -44,3 +44,56 @@ def get_lots(product=None, limit=50, *, gw=None):
     body = "\n".join(f"  {r['name']} | {(r['product_id'] or [0, 'N/A'])[1]} "
                      f"| {r['product_qty']:.1f}" for r in rows)
     return ok({"rows": rows, "count": len(rows)}, f"{len(rows)} lô/sê-ri:\n{body}")
+
+
+def list_reorder_needed(*, gw=None):
+    """Sản phẩm đang dưới mức tồn kho tối thiểu (theo Reordering Rules đã
+    thiết lập trong Odoo, KHÔNG tự nghĩ ra ngưỡng mới) + số lượng gợi ý mua
+    thêm (bù tới mức tối đa). Tồn thực tế sum qua read_group stock.quant —
+    field qty_to_order của orderpoint chỉ cập nhật khi cron Run Scheduler
+    chạy nên có thể stale, không dùng."""
+    gw = gw or default_gateway()
+    try:
+        orderpoints = gw.search_read("stock.warehouse.orderpoint",
+                                     [["active", "=", True]],
+                                     ["product_id", "product_min_qty",
+                                      "product_max_qty", "warehouse_id"],
+                                     limit=100)
+    except Exception as e:                                  # noqa: BLE001
+        return err(f"Lỗi tra cứu quy tắc tái đặt hàng: {e}")
+    if not orderpoints:
+        return ok({"rows": [], "count": 0},
+                  "Chưa có quy tắc tái đặt hàng nào được thiết lập.")
+
+    pids = [op["product_id"][0] for op in orderpoints]
+    try:
+        groups = gw.read_group("stock.quant",
+                               [["product_id", "in", pids],
+                                ["location_id.usage", "=", "internal"]],
+                               ["quantity:sum"], ["product_id"])
+    except Exception as e:                                  # noqa: BLE001
+        return err(f"Lỗi tra cứu tồn kho: {e}")
+    on_hand_by_pid = {(g.get("product_id") or [0, ""])[0]: g.get("quantity") or 0.0
+                      for g in groups}
+
+    below = []
+    for op in orderpoints:
+        pid = op["product_id"][0]
+        on_hand = on_hand_by_pid.get(pid, 0.0)
+        if on_hand < op["product_min_qty"]:
+            below.append({
+                "product_id": pid,
+                "product_name": op["product_id"][1],
+                "on_hand": on_hand,
+                "min_qty": op["product_min_qty"],
+                "max_qty": op["product_max_qty"],
+                "suggested_qty": max(op["product_max_qty"] - on_hand, 0.0),
+                "warehouse": op["warehouse_id"][1] if op.get("warehouse_id") else None,
+            })
+    if not below:
+        return ok({"rows": [], "count": 0},
+                  "Không có sản phẩm nào dưới mức tồn kho tối thiểu.")
+    lines = [f"  {r['product_name']} | tồn {r['on_hand']:g} (min {r['min_qty']:g}) "
+             f"| gợi ý mua {r['suggested_qty']:g}" for r in below]
+    return ok({"rows": below, "count": len(below)},
+              f"{len(below)} sản phẩm dưới mức tồn kho tối thiểu:\n" + "\n".join(lines))

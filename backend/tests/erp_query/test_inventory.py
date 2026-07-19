@@ -28,3 +28,100 @@ def test_get_stock_builds_internal_domain_and_envelope():
     model, method, args, kwargs = gw._t.calls[0]
     assert model == "stock.quant"
     assert ["location_id.usage", "=", "internal"] in args[0]
+
+
+class MultiModelTransport:
+    """Fake trả kết quả theo model — cho hàm gọi 2 model khác nhau."""
+    def __init__(self, by_model): self.by_model = by_model; self.calls = []
+    def call(self, model, method, args, kwargs):
+        self.calls.append((model, method, args, kwargs))
+        return self.by_model[model]
+
+
+OP_LAMP = {"id": 1, "product_id": [6, "Office Lamp"], "product_min_qty": 5.0,
+           "product_max_qty": 10.0, "warehouse_id": [1, "WH"]}
+
+
+def _reorder_gw(orderpoints, quant_groups):
+    return Gateway(MultiModelTransport({
+        "stock.warehouse.orderpoint": orderpoints,
+        "stock.quant": quant_groups,
+    }))
+
+
+def test_reorder_below_threshold_suggests_up_to_max():
+    # Không có quant group nào → on-hand mặc định 0 < min 5 → gợi ý mua max-0.
+    gw = _reorder_gw([OP_LAMP], [])
+    out = inventory.list_reorder_needed(gw=gw)
+    assert out["status"] == "success"
+    assert out["data"]["count"] == 1
+    row = out["data"]["rows"][0]
+    assert row["product_id"] == 6
+    assert row["product_name"] == "Office Lamp"
+    assert row["on_hand"] == 0.0
+    assert row["min_qty"] == 5.0
+    assert row["suggested_qty"] == 10.0
+    assert row["warehouse"] == "WH"
+    assert "Office Lamp" in out["display"]
+    assert "gợi ý mua 10" in out["display"]
+
+
+def test_reorder_none_below_threshold():
+    groups = [{"product_id": [6, "Office Lamp"], "quantity": 8.0}]
+    gw = _reorder_gw([OP_LAMP], groups)      # 8 >= min 5 → không dưới ngưỡng
+    out = inventory.list_reorder_needed(gw=gw)
+    assert out["status"] == "success"
+    assert out["data"]["rows"] == [] and out["data"]["count"] == 0
+    assert "Không có sản phẩm nào dưới mức tồn kho tối thiểu" in out["display"]
+
+
+def test_reorder_no_orderpoints_short_circuits():
+    gw = _reorder_gw([], [])
+    out = inventory.list_reorder_needed(gw=gw)
+    assert out["data"]["rows"] == []
+    assert "Chưa có quy tắc tái đặt hàng" in out["display"]
+    assert len(gw._t.calls) == 1             # KHÔNG gọi tiếp stock.quant
+
+
+def test_reorder_degenerate_min_zero_rule_excluded():
+    op = {"id": 4, "product_id": [9, "Table"], "product_min_qty": 0.0,
+          "product_max_qty": 0.0, "warehouse_id": [1, "WH"]}
+    gw = _reorder_gw([op], [])               # on-hand 0, min 0 → 0 < 0 là False
+    out = inventory.list_reorder_needed(gw=gw)
+    assert out["data"]["rows"] == []
+
+
+def test_reorder_call_shapes_orderpoint_and_quant():
+    # Bài học round 1 (product_tmpl_id): assert NỘI DUNG args, không chỉ đếm call.
+    gw = _reorder_gw([OP_LAMP], [])
+    inventory.list_reorder_needed(gw=gw)
+    op_model, op_method, op_args, op_kwargs = gw._t.calls[0]
+    assert op_model == "stock.warehouse.orderpoint" and op_method == "search_read"
+    assert ["active", "=", True] in op_args[0]
+    assert op_kwargs["limit"] == 100
+    q_model, q_method, q_args, q_kwargs = gw._t.calls[1]
+    assert q_model == "stock.quant" and q_method == "read_group"
+    domain, fields, groupby = q_args
+    assert ["product_id", "in", [6]] in domain
+    assert ["location_id.usage", "=", "internal"] in domain
+    assert fields == ["quantity:sum"]
+    assert groupby == ["product_id"]
+
+
+def test_reorder_gateway_error_on_orderpoint_returns_err():
+    class Boom:
+        def call(self, model, method, args, kwargs): raise RuntimeError("down")
+    out = inventory.list_reorder_needed(gw=Gateway(Boom()))
+    assert out["status"] == "error"
+    assert "quy tắc tái đặt hàng" in out["error"]
+
+
+def test_reorder_gateway_error_on_quant_returns_err():
+    class BoomOnQuant:
+        def call(self, model, method, args, kwargs):
+            if model == "stock.quant":
+                raise RuntimeError("down")
+            return [OP_LAMP]
+    out = inventory.list_reorder_needed(gw=Gateway(BoomOnQuant()))
+    assert out["status"] == "error"
+    assert "tồn kho" in out["error"]
