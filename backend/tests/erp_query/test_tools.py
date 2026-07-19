@@ -31,3 +31,8 @@ def test_build_tools_exposes_list_crm_leads_only():
     assert "list_crm_leads" in names
     assert "find_lead" not in names          # nội bộ coordinator, không expose
     assert "find_lead_duplicates" not in names
+
+
+def test_build_tools_exposes_list_reorder_needed():
+    names = {t.name for t in build_erp_query_tools()}
+    assert "list_reorder_needed" in names

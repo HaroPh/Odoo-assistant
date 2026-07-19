@@ -115,8 +115,16 @@ def build_erp_query_tools() -> list:
         """Hóa đơn khách hàng quá hạn (chưa trả hết, đến hạn đã qua)."""
         return _json(accounting.get_overdue_invoices())
 
+    @tool
+    def list_reorder_needed() -> str:
+        """Sản phẩm đang dưới mức tồn kho tối thiểu (Reordering Rules) kèm số
+        lượng gợi ý mua thêm. Dùng khi hỏi 'sản phẩm nào cần bổ sung/tái đặt
+        hàng' hoặc 'có gì tồn kho thấp không'."""
+        return _json(inventory.list_reorder_needed())
+
     return [find_customer, find_supplier, find_product, list_sale_orders,
             get_sale_order_detail, get_product_price, sales_summary, top_products,
             get_stock, get_lots, list_purchase_orders, get_purchase_order_detail,
             list_suppliers, get_product_suppliers, get_supplier_detail,
-            list_crm_leads, list_invoices, get_overdue_invoices]
+            list_crm_leads, list_invoices, get_overdue_invoices,
+            list_reorder_needed]
