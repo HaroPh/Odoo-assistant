@@ -396,3 +396,15 @@ def test_post_invoice_next_step_is_register_payment():
     step = NEXT_STEPS["post_invoice"]
     assert step.tool == "register_payment"
     assert step.args({"res_id": 64}) == {"invoice_id": 64}
+
+
+def test_expand_create_lead_chain():
+    steps = expand_chain("create_lead", "convert_lead")
+    assert steps == [("convert_lead", "Chuyển thành cơ hội")]
+
+
+def test_create_lead_next_step_args_lambda():
+    from backend.src.agents.write_registry import NEXT_STEPS
+    step = NEXT_STEPS["create_lead"]
+    assert step.tool == "convert_lead"
+    assert step.args({"res_id": 45}) == {"lead_id": 45}

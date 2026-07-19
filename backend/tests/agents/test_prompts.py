@@ -81,3 +81,13 @@ def test_planner_prompt_advertises_register_payment():
 
 def test_planner_prompt_chain_description_ends_at_register_payment():
     assert "post_invoice → register_payment" in WRITE_PLANNER_PROMPT
+
+
+def test_planner_prompt_advertises_crm_tools():
+    assert "create_lead(name" in WRITE_PLANNER_PROMPT
+    assert "convert_lead(lead_ref" in WRITE_PLANNER_PROMPT
+    assert "log_activity(lead_ref" in WRITE_PLANNER_PROMPT
+
+
+def test_planner_prompt_mentions_crm_chain():
+    assert "create_lead → convert_lead" in WRITE_PLANNER_PROMPT

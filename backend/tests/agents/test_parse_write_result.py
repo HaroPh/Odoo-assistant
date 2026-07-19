@@ -48,6 +48,7 @@ def test_next_steps_chain_is_linear_and_terminal():
         "create_rfq", "confirm_purchase_order", "receive_order",
         "create_bill_from_po",
         "update_quotation_lines", "update_rfq_lines",
+        "create_lead",
     }
     lw = {"tool": "x", "ok": True, "ref": "S00031", "model": "sale.order",
           "res_id": 42, "state": "draft", "display": "x"}
@@ -97,3 +98,8 @@ def test_next_steps_chain_is_linear_and_terminal():
             NEXT_STEPS["post_invoice"].label) \
         == ("register_payment", "Ghi nhận thanh toán")
     assert NEXT_STEPS["post_invoice"].args(lw) == {"invoice_id": 42}
+    # ── CRM chain ──
+    assert (NEXT_STEPS["create_lead"].tool, NEXT_STEPS["create_lead"].label) \
+        == ("convert_lead", "Chuyển thành cơ hội")
+    assert NEXT_STEPS["create_lead"].args({"res_id": 45}) == {"lead_id": 45}
+    assert "convert_lead" not in NEXT_STEPS       # terminal — không chain tiếp
