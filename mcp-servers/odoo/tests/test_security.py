@@ -44,3 +44,7 @@ def test_sanitize_model_rejects_leading_trailing_whitespace():
 def test_classify_register_payment_methods():
     assert security.classify_operation("action_register_payment") == "write"
     assert security.classify_operation("action_create_payments") == "write"
+
+
+def test_classify_convert_opportunity_method():
+    assert security.classify_operation("convert_opportunity") == "write"
