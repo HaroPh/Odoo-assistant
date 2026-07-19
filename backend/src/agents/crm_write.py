@@ -37,10 +37,33 @@ def _finish(tool_name: str, result) -> dict:
     return upd
 
 
+# Live-run finding (2026-07-19): Odoo's crm.lead name_search is plain ilike
+# substring match. Users commonly refer to a lead by "anh/chị + tên" even
+# though the stored title may not carry that honorific (e.g. create_lead's
+# LLM-extracted contact_name dropped "anh" while convert_lead/log_activity's
+# lead_ref kept it verbatim) — the query becomes a superset string that no
+# longer substring-matches, so a lead that clearly exists resolves to "none".
+# Deterministic strip + retry once (pattern _ACTIVITY_ALIASES: tất định, không
+# đoán bằng LLM).
+_HONORIFIC_PREFIXES = ("anh ", "chị ", "ông ", "bà ", "em ", "cô ", "chú ", "bác ")
+
+
+def _strip_honorific(ref: str) -> str | None:
+    low = ref.strip().lower()
+    for p in _HONORIFIC_PREFIXES:
+        if low.startswith(p):
+            return ref.strip()[len(p):].strip()
+    return None
+
+
 def _resolve_lead(lead_ref: str):
     """→ ("ok", {"id","name"}) | ("msg", <dict return ngay>) — gói chung
     resolve + disambiguation cho convert_lead/log_activity."""
     kind, val = resolve_entity_for_order(crm.find_lead(lead_ref), lead_ref)
+    if kind == "none":
+        stripped = _strip_honorific(lead_ref)
+        if stripped:
+            kind, val = resolve_entity_for_order(crm.find_lead(stripped), stripped)
     if kind == "error":
         return "msg", _msg(val)
     if kind == "none":

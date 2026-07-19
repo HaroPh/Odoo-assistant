@@ -184,6 +184,38 @@ async def test_convert_lead_ambiguous_disambig(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_convert_lead_resolves_after_stripping_honorific(monkeypatch):
+    # Live-run finding (2026-07-19): "chuyển lead anh Trần Phúc thành cơ hội"
+    # failed to resolve because Odoo name_search is plain ilike substring and
+    # the stored lead title ("Lead Trần Phúc") didn't contain "anh". Coordinator
+    # must retry once with the honorific stripped before giving up.
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
+    calls = []
+
+    def fake_find_lead(ref, *a, **k):
+        calls.append(ref)
+        if ref == "anh Trần Phúc":
+            return _ok_resolve([], False)
+        return _ok_resolve([{"id": 45, "name": "Lead Trần Phúc", "score": 1}], False)
+
+    monkeypatch.setattr(cw.crm, "find_lead", fake_find_lead)
+    rec = {}
+    graph = _graph(cw.make_convert_lead_node([_fake_tool("convert_lead", rec)]))
+    cfg = {"configurable": {"thread_id": "v4"}}
+    res = await graph.ainvoke(_state("convert_lead",
+                                     {"lead_ref": "anh Trần Phúc"}), cfg)
+    itr = res["__interrupt__"][0].value
+    assert itr["kind"] == "confirm" and "Lead Trần Phúc" in itr["question"]
+    await graph.ainvoke(Command(resume=True), cfg)
+    assert rec["args"]["lead_id"] == 45
+    # LangGraph re-runs the node from the top on resume (interrupt replay), so
+    # each invocation makes its own {original, stripped} pair — assert the
+    # pattern, not an exact call count.
+    assert set(calls) == {"anh Trần Phúc", "Trần Phúc"}
+    assert calls[0] == "anh Trần Phúc" and calls[1] == "Trần Phúc"
+
+
+@pytest.mark.asyncio
 async def test_convert_lead_missing_ref_asks(monkeypatch):
     monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     rec = {}
