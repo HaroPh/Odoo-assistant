@@ -24,3 +24,10 @@ def test_build_tools_exposes_vendor_read_tools():
     names = {t.name for t in build_erp_query_tools()}
     assert {"list_suppliers", "get_product_suppliers",
             "get_supplier_detail"} <= names
+
+
+def test_build_tools_exposes_list_crm_leads_only():
+    names = {t.name for t in build_erp_query_tools()}
+    assert "list_crm_leads" in names
+    assert "find_lead" not in names          # nội bộ coordinator, không expose
+    assert "find_lead_duplicates" not in names

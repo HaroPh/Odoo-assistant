@@ -4,7 +4,7 @@ import json
 
 from langchain_core.tools import tool
 
-from . import sales, inventory, purchase, accounting
+from . import sales, inventory, purchase, accounting, crm
 
 
 def _json(envelope) -> str:
@@ -99,6 +99,12 @@ def build_erp_query_tools() -> list:
         return _json(purchase.get_supplier_detail(name))
 
     @tool
+    def list_crm_leads(kind: str = "", stage: str = "") -> str:
+        """Liệt kê lead/cơ hội CRM. kind = 'lead' | 'opportunity', bỏ trống =
+        cả hai; stage lọc theo tên giai đoạn (New/Qualified/...)."""
+        return _json(crm.list_crm_leads(kind or None, stage or None))
+
+    @tool
     def list_invoices(move_type: str, partner: str = "", payment_state: str = "") -> str:
         """Hóa đơn đã phát hành; move_type = out_invoice (bán) | in_invoice (mua);
         partner lọc theo tên (chuỗi con, KHÔNG dùng ID)."""
@@ -113,4 +119,4 @@ def build_erp_query_tools() -> list:
             get_sale_order_detail, get_product_price, sales_summary, top_products,
             get_stock, get_lots, list_purchase_orders, get_purchase_order_detail,
             list_suppliers, get_product_suppliers, get_supplier_detail,
-            list_invoices, get_overdue_invoices]
+            list_crm_leads, list_invoices, get_overdue_invoices]
