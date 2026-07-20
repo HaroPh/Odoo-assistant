@@ -9,6 +9,7 @@ from .create_order import make_order_node, SALE_CFG, PURCHASE_CFG
 from .edit_order import make_edit_order_node, SALE_EDIT_CFG, PURCHASE_EDIT_CFG
 from .inventory_write import make_inventory_node
 from .crm_write import make_create_lead_node, make_convert_lead_node, make_log_activity_node
+from .mrp_write import make_create_mo_node
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,7 @@ WRITE_COORDINATORS = {
     "create_lead":  Spec("crm_create_lead",  lambda llm, tools: make_create_lead_node(tools)),
     "convert_lead": Spec("crm_convert_lead", lambda llm, tools: make_convert_lead_node(tools)),
     "log_activity": Spec("crm_log_activity", lambda llm, tools: make_log_activity_node(tools)),
+    "create_manufacturing_order": Spec("create_mo", lambda llm, tools: make_create_mo_node(tools)),
 }
 
 COORDINATED_TOOLS = frozenset(WRITE_COORDINATORS)
@@ -69,6 +71,13 @@ NEXT_STEPS = {
     # ── chuỗi CRM ──
     "create_lead":               NextStep("Chuyển thành cơ hội", "convert_lead",
                                           lambda lw: {"lead_id": lw["res_id"]}),
+    # ── chuỗi sản xuất ──
+    "create_manufacturing_order":  NextStep("Xác nhận lệnh sản xuất",
+                                            "confirm_manufacturing_order",
+                                            lambda lw: {"order_ref": lw["ref"]}),
+    "confirm_manufacturing_order": NextStep("Hoàn tất sản xuất",
+                                            "complete_manufacturing_order",
+                                            lambda lw: {"order_ref": lw["ref"]}),
 }
 
 

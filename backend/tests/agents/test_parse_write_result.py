@@ -49,6 +49,7 @@ def test_next_steps_chain_is_linear_and_terminal():
         "create_bill_from_po",
         "update_quotation_lines", "update_rfq_lines",
         "create_lead",
+        "create_manufacturing_order", "confirm_manufacturing_order",
     }
     lw = {"tool": "x", "ok": True, "ref": "S00031", "model": "sale.order",
           "res_id": 42, "state": "draft", "display": "x"}
@@ -103,3 +104,16 @@ def test_next_steps_chain_is_linear_and_terminal():
         == ("convert_lead", "Chuyển thành cơ hội")
     assert NEXT_STEPS["create_lead"].args({"res_id": 45}) == {"lead_id": 45}
     assert "convert_lead" not in NEXT_STEPS       # terminal — không chain tiếp
+    # ── manufacturing chain ──
+    mlw = {**lw, "ref": "WH/MO/00007", "model": "mrp.production", "res_id": 7}
+    assert (NEXT_STEPS["create_manufacturing_order"].tool,
+            NEXT_STEPS["create_manufacturing_order"].label) \
+        == ("confirm_manufacturing_order", "Xác nhận lệnh sản xuất")
+    assert NEXT_STEPS["create_manufacturing_order"].args(mlw) \
+        == {"order_ref": "WH/MO/00007"}
+    assert (NEXT_STEPS["confirm_manufacturing_order"].tool,
+            NEXT_STEPS["confirm_manufacturing_order"].label) \
+        == ("complete_manufacturing_order", "Hoàn tất sản xuất")
+    assert NEXT_STEPS["confirm_manufacturing_order"].args(mlw) \
+        == {"order_ref": "WH/MO/00007"}
+    assert "complete_manufacturing_order" not in NEXT_STEPS   # terminal
