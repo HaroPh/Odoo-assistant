@@ -36,3 +36,8 @@ def test_build_tools_exposes_list_crm_leads_only():
 def test_build_tools_exposes_list_reorder_needed():
     names = {t.name for t in build_erp_query_tools()}
     assert "list_reorder_needed" in names
+
+
+def test_build_tools_exposes_mrp_tools():
+    names = {t.name for t in build_erp_query_tools()}
+    assert {"get_bom_detail", "list_manufacturing_orders"} <= names

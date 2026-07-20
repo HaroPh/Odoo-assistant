@@ -4,7 +4,7 @@ import json
 
 from langchain_core.tools import tool
 
-from . import sales, inventory, purchase, accounting, crm
+from . import sales, inventory, purchase, accounting, crm, mrp
 
 
 def _json(envelope) -> str:
@@ -122,9 +122,23 @@ def build_erp_query_tools() -> list:
         hàng' hoặc 'có gì tồn kho thấp không'."""
         return _json(inventory.list_reorder_needed())
 
+    @tool
+    def get_bom_detail(product: str) -> str:
+        """Định mức nguyên vật liệu (BoM) của MỘT sản phẩm: các bản BoM,
+        nguyên liệu + số lượng cho mỗi batch, kèm tồn kho từng nguyên liệu.
+        Nhận tên hoặc mã sản phẩm."""
+        return _json(mrp.get_bom_detail(product))
+
+    @tool
+    def list_manufacturing_orders(state: str = "", product: str = "") -> str:
+        """Liệt kê lệnh sản xuất (Manufacturing Order); state = draft (nháp) |
+        confirmed | progress | to_close | done | cancel, bỏ trống = tất cả;
+        product lọc theo tên sản phẩm (chuỗi con)."""
+        return _json(mrp.list_manufacturing_orders(state or None, product or None))
+
     return [find_customer, find_supplier, find_product, list_sale_orders,
             get_sale_order_detail, get_product_price, sales_summary, top_products,
             get_stock, get_lots, list_purchase_orders, get_purchase_order_detail,
             list_suppliers, get_product_suppliers, get_supplier_detail,
             list_crm_leads, list_invoices, get_overdue_invoices,
-            list_reorder_needed]
+            list_reorder_needed, get_bom_detail, list_manufacturing_orders]
