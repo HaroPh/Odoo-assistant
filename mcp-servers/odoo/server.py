@@ -1126,6 +1126,182 @@ def log_activity(lead_id: int, activity_type: str, summary: str,
         return envelope(False, f"Lỗi khi lên lịch hoạt động: {e}")
 
 
+@mcp.tool()
+def create_manufacturing_order(product_id: int, qty: float, bom_id: int = 0) -> str:
+    """Tạo lệnh sản xuất (mrp.production, nháp) cho một sản phẩm có định mức
+    BoM. Nhận ID ĐÃ resolve (product_id bắt buộc; bom_id chỉ cần khi sản phẩm
+    có nhiều BoM — vắng thì tự tìm BoM 'normal' duy nhất, không rõ thì DỪNG).
+    YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        product_id: ID sản phẩm (product.product) cần sản xuất.
+        qty: Số lượng thành phẩm.
+        bom_id: ID định mức (mrp.bom) — 0 = tự tìm.
+    """
+    try:
+        if qty is None or qty <= 0:
+            return envelope(False, "Số lượng sản xuất phải lớn hơn 0.")
+        prows = odoo("product.product", "search_read",
+                     [[["id", "=", product_id]]],
+                     {"fields": ["id", "name", "product_tmpl_id"], "limit": 1})
+        if not prows:
+            return envelope(False, f"Không tìm thấy sản phẩm ID {product_id}.")
+        product = prows[0]
+        # mrp.bom link theo TEMPLATE id — KHÔNG dùng variant id ở domain BoM
+        # (trên instance thật template 39 = Table Top ≠ variant 39 = Drawer).
+        tmpl_id = product["product_tmpl_id"][0]
+
+        if bom_id:
+            brows = odoo("mrp.bom", "search_read", [[["id", "=", bom_id]]],
+                         {"fields": ["id", "type", "product_tmpl_id", "active"],
+                          "limit": 1})
+            if not brows or not brows[0]["active"]:
+                return envelope(False, f"Không tìm thấy BoM {bom_id}.")
+            bom = brows[0]
+            if bom["type"] != "normal":
+                return envelope(False,
+                                "BoM này là Kit — không sản xuất trực tiếp được.")
+            if bom["product_tmpl_id"][0] != tmpl_id:
+                return envelope(False, f"BoM {bom_id} không thuộc sản phẩm này.")
+        else:
+            brows = odoo("mrp.bom", "search_read",
+                         [[["product_tmpl_id", "=", tmpl_id],
+                           ["type", "=", "normal"], ["active", "=", True]]],
+                         {"fields": ["id", "code"], "limit": 10})
+            if not brows:
+                return envelope(False, "Sản phẩm chưa có định mức (BoM) — cần "
+                                       "tạo BoM trong Odoo trước.")
+            if len(brows) > 1:
+                listing = "\n".join(
+                    f"  • BoM {b['id']}: {b.get('code') or '(không mã)'}"
+                    for b in brows)
+                return envelope(False, f"Sản phẩm có nhiều BoM:\n{listing}\n"
+                                       f"Vui lòng chỉ rõ BoM.")
+            bom = brows[0]
+
+        # Vals tối thiểu (probe #1): Odoo tự default uom/picking/locations/
+        # date/company/consumption + tự sinh raw moves, finished move, workorders.
+        mo_id = odoo("mrp.production", "create",
+                     [{"product_id": product_id, "product_qty": float(qty),
+                       "bom_id": bom["id"], "origin": "AI Agent"}])
+        mo = odoo("mrp.production", "search_read", [[["id", "=", mo_id]]],
+                  {"fields": ["id", "name", "state"], "limit": 1})[0]
+        return envelope(True,
+                        f"Đã tạo lệnh sản xuất {mo['name']} (nháp): "
+                        f"{product['name']} × {qty:g}.",
+                        ref=mo["name"], model="mrp.production", res_id=mo_id,
+                        state="draft")
+    except Exception as e:  # noqa: BLE001
+        return envelope(False, f"Lỗi khi tạo lệnh sản xuất: {e}")
+
+
+@mcp.tool()
+def confirm_manufacturing_order(order_ref: str) -> str:
+    """Xác nhận lệnh sản xuất (mrp.production) đang ở trạng thái nháp.
+    draft → confirmed. YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        order_ref: Mã lệnh sản xuất, ví dụ "WH/MO/00007".
+    """
+    try:
+        rows = odoo("mrp.production", "search_read",
+                    [[["name", "=", order_ref]]],
+                    {"fields": ["id", "name", "state"], "limit": 2})
+        if not rows:
+            return envelope(False, f"Không tìm thấy lệnh sản xuất '{order_ref}'.")
+        if len(rows) > 1:
+            return envelope(False, f"Có nhiều lệnh sản xuất tên '{order_ref}'. "
+                                   f"Vui lòng nêu rõ hơn.")
+        mo = rows[0]
+        name, state = mo["name"], mo["state"]
+        if state == "done":
+            return envelope(False, f"Lệnh sản xuất {name} đã hoàn tất rồi.")
+        if state == "cancel":
+            return envelope(False,
+                            f"Lệnh sản xuất {name} đã bị hủy, không thể xác nhận.")
+        if state != "draft":
+            return envelope(False, f"Lệnh sản xuất {name} đã được xác nhận rồi.")
+        odoo("mrp.production", "action_confirm", [[mo["id"]]])
+        return envelope(True, f"Đã xác nhận lệnh sản xuất {name}.",
+                        ref=name, model="mrp.production", res_id=mo["id"],
+                        state="confirmed")
+    except Exception as e:  # noqa: BLE001
+        return envelope(False, f"Lỗi khi xác nhận lệnh sản xuất: {e}")
+
+
+@mcp.tool()
+def complete_manufacturing_order(order_ref: str) -> str:
+    """Hoàn tất lệnh sản xuất ĐÃ XÁC NHẬN: kiểm tra đủ nguyên liệu (từ chối
+    rõ ràng nếu thiếu), rồi mark done — tiêu hao nguyên liệu, nhập kho thành
+    phẩm. Work order con (nếu có) được Odoo tự hoàn tất. YÊU CẦU XÁC NHẬN từ
+    người dùng trước khi gọi.
+
+    Args:
+        order_ref: Mã lệnh sản xuất, ví dụ "WH/MO/00007".
+    """
+    try:
+        rows = odoo("mrp.production", "search_read",
+                    [[["name", "=", order_ref]]],
+                    {"fields": ["id", "name", "state", "product_id",
+                                "product_qty", "move_raw_ids"], "limit": 2})
+        if not rows:
+            return envelope(False, f"Không tìm thấy lệnh sản xuất '{order_ref}'.")
+        if len(rows) > 1:
+            return envelope(False, f"Có nhiều lệnh sản xuất tên '{order_ref}'. "
+                                   f"Vui lòng nêu rõ hơn.")
+        mo = rows[0]
+        name = mo["name"]
+        if mo["state"] == "draft":
+            return envelope(False, f"Lệnh sản xuất {name} chưa xác nhận. "
+                                   f"Hãy xác nhận trước khi hoàn tất.")
+        if mo["state"] == "done":
+            return envelope(False, f"Lệnh sản xuất {name} đã hoàn tất rồi.")
+        if mo["state"] == "cancel":
+            return envelope(False, f"Lệnh sản xuất {name} đã bị hủy.")
+
+        def _raw_moves():
+            if not mo["move_raw_ids"]:
+                return []
+            return odoo("stock.move", "search_read",
+                        [[["id", "in", mo["move_raw_ids"]]]],
+                        {"fields": ["product_id", "product_uom_qty",
+                                    "quantity", "state"], "limit": 100})
+
+        # Pre-check tất định (probe #5): thiếu nguyên liệu mà mark done sẽ lộ
+        # Fault "Lot/Serial Number" khó hiểu của Odoo — chặn trước, thử reserve
+        # đúng 1 lần rồi từ chối với liệt kê rõ ràng.
+        moves = _raw_moves()
+        short = [m for m in moves if m["state"] not in ("assigned", "done")]
+        if short:
+            odoo("mrp.production", "action_assign", [[mo["id"]]])
+            moves = _raw_moves()
+            short = [m for m in moves if m["state"] not in ("assigned", "done")]
+        if short:
+            listing = "\n".join(
+                f"  - {m['product_id'][1]}: cần {m['product_uom_qty']:g}, "
+                f"sẵn sàng {m['quantity']:g}" for m in short)
+            return envelope(False,
+                            f"Chưa đủ nguyên liệu cho {name}:\n{listing}\n"
+                            f"Cần nhập thêm nguyên liệu (có thể tạo đơn mua) "
+                            f"trước khi hoàn tất.")
+
+        # Probe #3/#4: đủ nguyên liệu → mark done tự set qty_producing, tự
+        # hoàn tất workorder. Re-read xác minh (safety net — không claim bừa).
+        odoo("mrp.production", "button_mark_done", [[mo["id"]]])
+        after = odoo("mrp.production", "search_read", [[["id", "=", mo["id"]]]],
+                     {"fields": ["id", "state"], "limit": 1})[0]
+        if after["state"] != "done":
+            return envelope(False, f"Lệnh sản xuất {name} chưa hoàn tất được "
+                                   f"(trạng thái hiện tại: {after['state']}).")
+        return envelope(True,
+                        f"Đã hoàn tất lệnh sản xuất {name}: nhập kho "
+                        f"{mo['product_qty']:g} {mo['product_id'][1]}.",
+                        ref=name, model="mrp.production", res_id=mo["id"],
+                        state="done")
+    except Exception as e:  # noqa: BLE001
+        return envelope(False, f"Lỗi khi hoàn tất lệnh sản xuất: {e}")
+
+
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
