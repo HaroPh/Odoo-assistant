@@ -225,3 +225,20 @@ def test_list_late_deliveries_capped_true_at_100_rows():
     for i in range(15):
         assert f"WH/OUT/{i:05d}" in display
     assert "...và 85 phiếu khác." in display
+    # Verify caveat text is present when capped=True
+    assert "(có thể còn nhiều hơn — đã đạt giới hạn 100 dòng)" in display
+
+
+def test_list_late_deliveries_capped_false_excludes_caveat():
+    # Generate 50 rows (less than 100 limit) — capped should be False
+    rows = [
+        {"name": f"WH/OUT/{i:05d}", "partner_id": [i, f"Partner{i}"],
+         "scheduled_date": f"2026-05-{10 + (i % 10):02d} {10 + (i // 10):02d}:00:00", "state": "assigned"}
+        for i in range(50)
+    ]
+    out = inventory.list_late_deliveries(gw=_gw(rows))
+    assert out["data"]["count"] == 50
+    assert out["data"]["capped"] is False
+    display = out["display"]
+    # Caveat text should NOT appear when capped=False
+    assert "(có thể còn nhiều hơn — đã đạt giới hạn 100 dòng)" not in display

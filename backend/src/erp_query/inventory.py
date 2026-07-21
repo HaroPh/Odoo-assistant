@@ -117,8 +117,12 @@ def list_late_deliveries(direction=None, *, gw=None):
                               order="scheduled_date asc", limit=100)
     except Exception as e:                                  # noqa: BLE001
         return err(f"Lỗi tra phiếu giao/nhận trễ hạn: {e}")
+    capped = len(rows) >= 100
     if not rows:
-        return ok({"rows": [], "count": 0, "capped": False}, "Không có phiếu giao/nhận nào trễ hạn.")
+        msg = "Không có phiếu giao/nhận nào trễ hạn."
+        if capped:
+            msg += " (có thể còn nhiều hơn — đã đạt giới hạn 100 dòng)"
+        return ok({"rows": [], "count": 0, "capped": capped}, msg)
     # Cap both display and data["rows"] to first 15 for LLM token efficiency;
     # keep data["count"] as true total (may be > len(data["rows"]) when capped)
     display_rows = rows[:15]
@@ -127,8 +131,10 @@ def list_late_deliveries(direction=None, *, gw=None):
         f"| hẹn {r['scheduled_date'][:10]} | {r['state']}"
         for r in display_rows)
     count = len(rows)
-    display_text = f"{count} phiếu trễ hạn:\n{body}"
+    display_text = f"{count} phiếu trễ hạn"
+    if capped:
+        display_text += " (có thể còn nhiều hơn — đã đạt giới hạn 100 dòng)"
+    display_text += f":\n{body}"
     if count > 15:
         display_text += f"\n...và {count - 15} phiếu khác."
-    capped = len(rows) >= 100
     return ok({"rows": display_rows, "count": count, "capped": capped}, display_text)
