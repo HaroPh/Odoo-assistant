@@ -40,6 +40,73 @@ def test_build_citations_empty():
     assert build_citations([]) == ""
 
 
+from backend.src.agents.synthesis import extract_used_citations, USED_MARKER
+
+
+def _two_chunks():
+    c1 = _chunk(chunk_id=1, source_file="C:/docs/policy.docx",
+                section_path="Chính sách hoàn hàng › Mục 1", page=1)
+    c2 = _chunk(chunk_id=2, source_file="C:/docs/sla.docx",
+                section_path="SLA › Điều 2", page=3)
+    return [c1, c2]
+
+
+def test_extract_used_citations_single_index_filters_footer():
+    chunks = _two_chunks()
+    clean, footer = extract_used_citations(
+        f"Trả lời dựa tài liệu 1.\n\n{USED_MARKER}: 1", chunks)
+    assert clean == "Trả lời dựa tài liệu 1."
+    assert "policy.docx" in footer
+    assert "sla.docx" not in footer
+
+
+def test_extract_used_citations_multiple_indices_keep_retrieval_order():
+    chunks = _two_chunks()
+    clean, footer = extract_used_citations(
+        f"Trả lời dựa cả hai.\n\n{USED_MARKER}: 2,1", chunks)
+    assert footer.count("•") == 2
+    assert footer.index("policy.docx") < footer.index("sla.docx")
+
+
+def test_extract_used_citations_missing_marker_falls_back_to_all():
+    chunks = _two_chunks()
+    clean, footer = extract_used_citations("Trả lời không có marker.", chunks)
+    assert clean == "Trả lời không có marker."
+    assert "policy.docx" in footer and "sla.docx" in footer
+
+
+def test_extract_used_citations_out_of_range_indices_fall_back_but_strip_marker():
+    chunks = _two_chunks()
+    clean, footer = extract_used_citations(
+        f"Trả lời.\n\n{USED_MARKER}: 5,9", chunks)
+    assert clean == "Trả lời."
+    assert USED_MARKER not in clean
+    assert "policy.docx" in footer and "sla.docx" in footer
+
+
+def test_extract_used_citations_duplicate_indices_dedupe():
+    chunks = _two_chunks()
+    clean, footer = extract_used_citations(
+        f"Trả lời.\n\n{USED_MARKER}: 1,1,1", chunks)
+    assert footer.count("•") == 1
+    assert "policy.docx" in footer
+
+
+def test_format_context_default_start_numbers_from_one():
+    from backend.src.agents.synthesis import _format_context
+    text = _format_context(_two_chunks())
+    assert text.startswith("[1] ")
+    assert "[2] " in text
+
+
+def test_format_context_custom_start_offsets_numbering():
+    from backend.src.agents.synthesis import _format_context
+    text = _format_context(_two_chunks(), start=3)
+    assert text.startswith("[3] ")
+    assert "[4] " in text
+    assert "[1] " not in text
+
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from backend.src.rag.types import RetrievalResult
@@ -95,6 +162,20 @@ async def test_synthesize_happy_appends_footer():
     assert "Khách được hoàn trong 30 ngày." in out
     assert "📄 Nguồn:" in out
     assert "policy.docx, tr.1" in out
+
+
+@pytest.mark.asyncio
+async def test_synthesize_with_marker_filters_footer_to_used_chunk():
+    llm = make_mock_llm(f"Khách được hoàn trong 30 ngày.\n\n{syn.USED_MARKER}: 1")
+    c1 = _chunk(chunk_id=1, dense_score=0.7, section_path="Chính sách hoàn hàng › Mục 1",
+               source_file="C:/docs/policy.docx", page=1)
+    c2 = _chunk(chunk_id=2, dense_score=0.6, section_path="SLA › Điều 2",
+               source_file="C:/docs/sla.docx", page=3)
+    out = await syn.synthesize("q", _result([c1, c2]), llm)
+    assert "Khách được hoàn trong 30 ngày." in out
+    assert syn.USED_MARKER not in out
+    assert "policy.docx" in out
+    assert "sla.docx" not in out
 
 
 def test_passes_floor_dense_above_floor():

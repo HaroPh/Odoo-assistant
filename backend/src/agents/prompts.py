@@ -103,7 +103,9 @@ QUAN TRỌNG: Nếu tài liệu CÓ đề cập đến chủ đề câu hỏi th
 
 Chỉ khi các đoạn tài liệu HOÀN TOÀN KHÔNG đề cập đến chủ đề câu hỏi, hãy trả lời đúng một dòng duy nhất: KHÔNG_ĐỦ_THÔNG_TIN
 
-Nếu trả lời được, trả lời tự nhiên, thân thiện, ngắn gọn bằng tiếng Việt, bám sát nội dung tài liệu. /no_think"""
+Nếu trả lời được, trả lời tự nhiên, thân thiện, ngắn gọn bằng tiếng Việt, bám sát nội dung tài liệu.
+
+Sau khi trả lời xong, LUÔN thêm một dòng CUỐI CÙNG theo đúng định dạng: NGUỒN_DÙNG: <số thứ tự các đoạn TÀI LIỆU bạn đã dùng để trả lời, cách nhau bởi dấu phẩy>. Ví dụ: NGUỒN_DÙNG: 1,3. Chỉ liệt kê số của đoạn THỰC SỰ dùng để trả lời, không liệt kê đoạn không liên quan. Không thêm dòng này nếu trả lời KHÔNG_ĐỦ_THÔNG_TIN. /no_think"""
 
 FUSION_PROMPT = """Bạn là trợ lý ERP nội bộ, trả lời bằng tiếng Việt. Bạn xử lý câu hỏi cần KẾT HỢP tài liệu nội bộ VÀ dữ liệu ERP sống.
 

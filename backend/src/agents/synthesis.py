@@ -6,6 +6,7 @@ footer, and owns the no-result guard. This keeps backend/src/rag/ synthesis-free
 — all answer/refuse/threshold logic lives here, not in the retrieval library.
 """
 import os
+import re
 
 from langchain_core.messages import SystemMessage, HumanMessage
 
@@ -15,6 +16,8 @@ COS_FLOOR = float(os.environ.get("RAG_NO_RESULT_COS_FLOOR", "0.35"))
 SENTINEL = "KHÔNG_ĐỦ_THÔNG_TIN"
 GUARD_MSG = "Không tìm thấy tài liệu liên quan đến câu hỏi này."
 SAFE_MSG = "Xin lỗi, tính năng tra cứu tài liệu tạm thời gặp sự cố. Vui lòng thử lại sau."
+USED_MARKER = "NGUỒN_DÙNG"
+_MARKER_RE = re.compile(rf'\n?{USED_MARKER}:\s*([0-9,\s]*)', re.IGNORECASE)
 
 
 def build_citations(chunks) -> str:
@@ -43,10 +46,25 @@ def build_citations(chunks) -> str:
     return "\n\n📄 Nguồn:\n" + "\n".join(lines)
 
 
-def _format_context(chunks) -> str:
+def extract_used_citations(body: str, chunks: list) -> tuple[str, str]:
+    """Strip the LLM's NGUỒN_DÙNG marker line and build a citation footer
+    limited to the chunks it names. Falls back to citing all chunks if the
+    marker is missing or names no valid chunk index."""
+    m = _MARKER_RE.search(body)
+    if not m:
+        return body, build_citations(chunks)
+    clean = body[:m.start()].rstrip()
+    indices = {int(x) for x in re.findall(r'\d+', m.group(1))}
+    used = [c for i, c in enumerate(chunks, start=1) if i in indices]
+    if not used:
+        return clean, build_citations(chunks)
+    return clean, build_citations(used)
+
+
+def _format_context(chunks, start: int = 1) -> str:
     """Numbered chunk texts, each tagged with its source label, for the prompt."""
     parts = []
-    for i, c in enumerate(chunks, start=1):
+    for i, c in enumerate(chunks, start=start):
         label = c.section_path or c.sheet or os.path.basename(c.source_file)
         parts.append(f"[{i}] ({label}) {c.text}")
     return "\n".join(parts)
@@ -81,4 +99,5 @@ async def synthesize(query: str, result, llm) -> str:
     body = (resp.content or "").strip()
     if SENTINEL in body:
         return GUARD_MSG
-    return body + build_citations(result.chunks)
+    clean, footer = extract_used_citations(body, result.chunks)
+    return clean + footer
