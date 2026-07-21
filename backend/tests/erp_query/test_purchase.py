@@ -223,3 +223,33 @@ def test_list_po_mismatches_none_found():
     out = purchase.list_po_mismatches(gw=_gw([]))
     assert out["data"]["count"] == 0
     assert "Không có đơn mua nào" in out["display"]
+
+
+def test_list_po_mismatches_capped_false_below_limit():
+    """When fetched rows < 100, capped must be False and no warning in display."""
+    lines = [{"order_id": [5, "P00005"], "product_id": [1, "A"],
+              "product_qty": 2.0, "qty_received": 1.0, "qty_invoiced": 2.0}]
+    out = purchase.list_po_mismatches(gw=_gw(lines))
+    assert out["data"]["capped"] is False
+    assert "có thể còn nhiều hơn" not in out["display"]
+    assert out["data"]["count"] == 1
+
+
+def test_list_po_mismatches_capped_true_at_limit():
+    """When fetched rows == 100 (hit the cap), capped must be True and display warns."""
+    # Create exactly 100 mismatched lines across different POs
+    lines = []
+    for i in range(100):
+        po_id = 1000 + (i // 10)  # 10 POs with 10 lines each
+        lines.append({
+            "order_id": [po_id, f"P{po_id:05d}"],
+            "product_id": [i + 1, f"Product_{i}"],
+            "product_qty": 10.0,
+            "qty_received": 5.0,
+            "qty_invoiced": 8.0  # All are mismatches
+        })
+    out = purchase.list_po_mismatches(gw=_gw(lines))
+    assert out["data"]["capped"] is True
+    assert "có thể còn nhiều hơn — đã đạt giới hạn 100 dòng" in out["display"]
+    # Should report 10 unique POs
+    assert out["data"]["count"] == 10

@@ -202,7 +202,9 @@ def check_po_matching(ref, *, gw=None):
 
 def list_po_mismatches(*, gw=None):
     """Mọi PO đang mở/đã xong (state purchase|done) có ít nhất 1 dòng hóa
-    đơn NHIỀU HƠN thực nhận — cần rà soát trước khi thanh toán thêm."""
+    đơn NHIỀU HƠN thực nhận — cần rà soát trước khi thanh toán thêm. Đếm qua
+    search_read limit 100 CÓ Ý THỨC: capped=True khi chạm trần → hiển thị
+    cảnh báo (khác truncation ngầm — đây là đếm có cap)."""
     gw = gw or default_gateway()
     try:
         lines = gw.search_read("purchase.order.line",
@@ -210,17 +212,21 @@ def list_po_mismatches(*, gw=None):
                                 ["qty_invoiced", ">", 0]],
                                ["order_id", "product_id", "product_qty",
                                 "qty_received", "qty_invoiced"],
-                               order="order_id asc", limit=500)
+                               order="order_id asc", limit=100)
     except Exception as e:                                  # noqa: BLE001
         return err(f"Lỗi tra đơn mua lệch đối soát: {e}")
+    capped = len(lines) >= 100
     bad = [l for l in lines if l["qty_invoiced"] > l["qty_received"]]
     if not bad:
-        return ok({"rows": [], "count": 0},
+        return ok({"rows": [], "count": 0, "capped": capped},
                   "Không có đơn mua nào có hóa đơn vượt thực nhận.")
     seen_pos = {l["order_id"][0]: l["order_id"][1] for l in bad}
     lines_txt = "\n".join(
         f"  {l['order_id'][1]} | {(l['product_id'] or [0, 'N/A'])[1]} "
         f"| nhận {l['qty_received']:g} | hóa đơn {l['qty_invoiced']:g}"
         for l in bad)
-    return ok({"rows": bad, "count": len(seen_pos)},
-              f"{len(seen_pos)} đơn mua có dòng hóa đơn vượt thực nhận:\n{lines_txt}")
+    summary = f"{len(seen_pos)} đơn mua có dòng hóa đơn vượt thực nhận"
+    if capped:
+        summary += " (có thể còn nhiều hơn — đã đạt giới hạn 100 dòng)"
+    return ok({"rows": bad, "count": len(seen_pos), "capped": capped},
+              f"{summary}:\n{lines_txt}")
