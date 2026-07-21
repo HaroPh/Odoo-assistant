@@ -4,6 +4,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
 import pytest
 from backend.src.rag.types import Chunk, RetrievalResult
+from backend.src.agents.synthesis import USED_MARKER
 
 
 def _chunk(**kw):
@@ -55,6 +56,24 @@ async def test_search_documents_passing_returns_text_and_collects(monkeypatch):
     assert "Hoàn hàng trong 30 ngày." in out
     assert len(collected) == 1
     assert collected[0].section_path == "Chính sách hoàn hàng › Điều 4"
+
+
+@pytest.mark.asyncio
+async def test_search_documents_second_call_numbers_continue(monkeypatch):
+    import backend.src.agents.fusion as fusion_mod
+    c1 = _chunk(chunk_id=1, source_file="C:/docs/policy.docx",
+                section_path="Chính sách hoàn hàng › Điều 4")
+    c2 = _chunk(chunk_id=2, source_file="C:/docs/sla.docx",
+                section_path="SLA › Điều 2")
+    results = iter([_result([c1]), _result([c2])])
+    monkeypatch.setattr(fusion_mod, "retrieve", lambda q, *a, **kw: next(results))
+    collected = []
+    tool = fusion_mod._make_search_documents_tool(collected)
+    out1 = await tool.ainvoke({"query": "chính sách hoàn hàng"})
+    out2 = await tool.ainvoke({"query": "SLA"})
+    assert out1.startswith("[1] ")
+    assert out2.startswith("[2] ")
+    assert len(collected) == 2
 
 
 from unittest.mock import MagicMock, AsyncMock
@@ -116,6 +135,40 @@ async def test_fusion_happy_path_appends_footer(monkeypatch):
     assert "Khách đã quá hạn, không được hoàn." in content
     assert "📄 Nguồn:" in content
     assert "policy.docx, tr.1" in content
+
+
+@pytest.mark.asyncio
+async def test_fusion_marker_filters_footer_to_second_call_chunk(monkeypatch):
+    import backend.src.agents.fusion as fusion_mod
+    c1 = _chunk(chunk_id=1, source_file="C:/docs/policy.docx",
+                section_path="Chính sách hoàn hàng › Điều 4")
+    c2 = _chunk(chunk_id=2, source_file="C:/docs/sla.docx",
+                section_path="SLA › Điều 2")
+    results = iter([_result([c1]), _result([c2])])
+    monkeypatch.setattr(fusion_mod, "retrieve", lambda q, *a, **kw: next(results))
+
+    def fake_create_agent(llm, tools, system_prompt=None):
+        search = next(t for t in tools if t.name == "search_documents")
+        agent = MagicMock()
+
+        async def ainvoke(payload):
+            await search.ainvoke({"query": "chính sách hoàn hàng"})
+            await search.ainvoke({"query": "SLA"})
+            return {"messages": [AIMessage(
+                content=f"Theo SLA, xử lý trong 24h.\n\n{USED_MARKER}: 2")]}
+
+        agent.ainvoke = ainvoke
+        return agent
+
+    monkeypatch.setattr(fusion_mod, "_create_agent", fake_create_agent)
+
+    node = fusion_mod.make_fusion_node(MagicMock(), tools=[])
+    out = await node(_state("SLA xử lý trong bao lâu?"))
+    content = out["messages"][0].content
+    assert "Theo SLA, xử lý trong 24h." in content
+    assert USED_MARKER not in content
+    assert "sla.docx" in content
+    assert "policy.docx" not in content
 
 
 @pytest.mark.asyncio

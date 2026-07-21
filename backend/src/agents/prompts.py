@@ -123,7 +123,9 @@ Quy tắc:
 - Nếu search_documents trả "Không tìm thấy tài liệu liên quan." hoặc thiếu dữ liệu ERP cần thiết, hãy nói rõ là không đủ căn cứ — không suy đoán.
 - KHÔNG thực hiện thao tác ghi/tạo/sửa/xác nhận.
 - KHÔNG tự viết mục "Nguồn"/trích dẫn — phần trích dẫn sẽ được thêm tự động.
-- Trả lời tự nhiên, thân thiện, ngắn gọn bằng tiếng Việt. /no_think"""
+- Trả lời tự nhiên, thân thiện, ngắn gọn bằng tiếng Việt.
+
+Sau khi trả lời xong, LUÔN thêm một dòng CUỐI CÙNG theo đúng định dạng: NGUỒN_DÙNG: <số thứ tự các đoạn tài liệu do search_documents trả về mà bạn đã dùng để trả lời, cách nhau bởi dấu phẩy>. Ví dụ: NGUỒN_DÙNG: 2,5. Nếu không dùng đoạn tài liệu nào (câu hỏi chỉ cần dữ liệu ERP), bỏ qua dòng này. /no_think"""
 
 
 def render_working_context(wc: dict) -> str:

@@ -4,10 +4,10 @@
 A bounded-agentic tool-calling agent that answers Group-3 questions needing both
 internal documents and live ERP data. It calls search_documents (a thin wrapper
 over rag.retrieve) and the erp_query business read tools, reasons over both, and
-the node appends a deterministic citation footer. The WRITE_TOOL_NAMES filter
-keeps fusion read-only as a defense-in-depth guard even though the graph now
-hands it only read tools. rag/ stays synthesis-free; all answer/citation logic
-lives here.
+the node appends a deterministic citation footer for the documents the model
+reports having used this turn. The WRITE_TOOL_NAMES filter keeps fusion
+read-only as a defense-in-depth guard even though the graph now hands it only
+read tools. rag/ stays synthesis-free; all answer/citation logic lives here.
 """
 import asyncio
 import logging
@@ -18,7 +18,7 @@ from langchain.agents import create_agent as _create_agent
 
 from .state import ERPAgentState
 from .prompts import FUSION_PROMPT
-from .synthesis import passes_floor, _format_context, build_citations, SAFE_MSG
+from .synthesis import passes_floor, _format_context, extract_used_citations, SAFE_MSG
 from ..rag.retrieve import retrieve
 
 logger = logging.getLogger(__name__)
@@ -44,8 +44,9 @@ def _make_search_documents_tool(collected: list):
         result = await asyncio.to_thread(retrieve, query)
         if result.is_empty() or not passes_floor(result):
             return "Không tìm thấy tài liệu liên quan."
+        start = len(collected) + 1
         collected.extend(result.chunks)
-        return _format_context(result.chunks)
+        return _format_context(result.chunks, start=start)
 
     return search_documents
 
@@ -72,7 +73,8 @@ def make_fusion_node(llm, tools):
             answer = (result["messages"][-1].content or "").strip()
             if not answer:
                 return {"messages": [AIMessage(content=SAFE_MSG)]}
-            answer += build_citations(collected)
+            clean, footer = extract_used_citations(answer, collected)
+            answer = clean + footer
         except Exception:
             logger.exception("fusion_node failed")
             answer = SAFE_MSG
