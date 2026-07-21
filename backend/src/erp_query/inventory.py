@@ -118,9 +118,16 @@ def list_late_deliveries(direction=None, *, gw=None):
     except Exception as e:                                  # noqa: BLE001
         return err(f"Lỗi tra phiếu giao/nhận trễ hạn: {e}")
     if not rows:
-        return ok({"rows": [], "count": 0}, "Không có phiếu giao/nhận nào trễ hạn.")
+        return ok({"rows": [], "count": 0, "capped": False}, "Không có phiếu giao/nhận nào trễ hạn.")
+    # Display only first 15 rows for LLM readability, but keep full count and rows in data
+    display_rows = rows[:15]
     body = "\n".join(
         f"  {r['name']} | {(r['partner_id'] or [0, '—'])[1]} "
         f"| hẹn {r['scheduled_date'][:10]} | {r['state']}"
-        for r in rows)
-    return ok({"rows": rows, "count": len(rows)}, f"{len(rows)} phiếu trễ hạn:\n{body}")
+        for r in display_rows)
+    count = len(rows)
+    display_text = f"{count} phiếu trễ hạn:\n{body}"
+    if count > 15:
+        display_text += f"\n...và {count - 15} phiếu khác."
+    capped = len(rows) >= 100
+    return ok({"rows": rows, "count": count, "capped": capped}, display_text)

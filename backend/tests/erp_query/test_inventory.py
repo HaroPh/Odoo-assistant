@@ -158,3 +158,69 @@ def test_list_late_deliveries_missing_partner_shows_dash():
              "scheduled_date": "2026-06-23 13:28:37", "state": "draft"}]
     out = inventory.list_late_deliveries(gw=_gw(rows))
     assert "—" in out["display"]
+
+
+def test_list_late_deliveries_caps_display_at_15_rows():
+    # Generate 20 fake delivery rows, sorted by date
+    rows = [
+        {"name": f"WH/OUT/{i:05d}", "partner_id": [i, f"Partner{i}"],
+         "scheduled_date": f"2026-06-{10+i:02d} 10:00:00", "state": "assigned"}
+        for i in range(20)
+    ]
+    out = inventory.list_late_deliveries(gw=_gw(rows))
+    # Full data should contain all 20
+    assert out["data"]["count"] == 20
+    assert len(out["data"]["rows"]) == 20
+    # Display should only show first 15 + truncation note
+    display = out["display"]
+    assert "20 phiếu trễ hạn:" in display
+    # First 15 should appear
+    for i in range(15):
+        assert f"WH/OUT/{i:05d}" in display
+    # 16-20 should NOT appear (they're not in the first 15)
+    for i in range(15, 20):
+        assert f"WH/OUT/{i:05d}" not in display
+    # Truncation note should appear
+    assert "...và 5 phiếu khác." in display
+
+
+def test_list_late_deliveries_no_truncation_note_for_15_or_fewer():
+    # Generate exactly 3 rows
+    rows = [
+        {"name": f"WH/OUT/{i:05d}", "partner_id": [i, f"Partner{i}"],
+         "scheduled_date": f"2026-06-{20+i:02d} 10:00:00", "state": "assigned"}
+        for i in range(3)
+    ]
+    out = inventory.list_late_deliveries(gw=_gw(rows))
+    assert out["data"]["count"] == 3
+    assert len(out["data"]["rows"]) == 3
+    display = out["display"]
+    # All 3 should appear
+    for i in range(3):
+        assert f"WH/OUT/{i:05d}" in display
+    # NO truncation note should appear
+    assert "...và" not in display
+
+
+def test_list_late_deliveries_capped_false_for_small_result():
+    rows = [{"name": "WH/OUT/00001", "partner_id": [8, "Wood Corner"],
+             "scheduled_date": "2026-06-23 13:28:37", "state": "assigned"}]
+    out = inventory.list_late_deliveries(gw=_gw(rows))
+    assert out["data"]["capped"] is False
+
+
+def test_list_late_deliveries_capped_true_at_100_rows():
+    # Generate exactly 100 rows to simulate hitting the gateway limit
+    rows = [
+        {"name": f"WH/OUT/{i:05d}", "partner_id": [i, f"Partner{i}"],
+         "scheduled_date": f"2026-05-{10 + (i % 20):02d} {10 + (i // 20):02d}:00:00", "state": "assigned"}
+        for i in range(100)
+    ]
+    out = inventory.list_late_deliveries(gw=_gw(rows))
+    assert out["data"]["count"] == 100
+    assert out["data"]["capped"] is True
+    # Display should still only show first 15, plus truncation note
+    display = out["display"]
+    for i in range(15):
+        assert f"WH/OUT/{i:05d}" in display
+    assert "...và 85 phiếu khác." in display
