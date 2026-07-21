@@ -1,4 +1,5 @@
 """Inventory bounded context — product, stock, lots."""
+from datetime import datetime, timezone
 from .envelope import ok, err
 from .gateway import default_gateway
 from .resolve import resolve_entity
@@ -97,3 +98,29 @@ def list_reorder_needed(*, gw=None):
              f"| gợi ý mua {r['suggested_qty']:g}" for r in below]
     return ok({"rows": below, "count": len(below)},
               f"{len(below)} sản phẩm dưới mức tồn kho tối thiểu:\n" + "\n".join(lines))
+
+
+def list_late_deliveries(direction=None, *, gw=None):
+    """Phiếu giao/nhận đang trễ hạn (scheduled_date đã qua, chưa done/cancel).
+    direction: "outgoing" (giao khách) | "incoming" (nhận từ NCC) | None
+    (cả hai). Loại 'mrp_operation' (di chuyển nội bộ sản xuất, không phải
+    giao/nhận với bên ngoài)."""
+    gw = gw or default_gateway()
+    codes = [direction] if direction in ("outgoing", "incoming") else ["outgoing", "incoming"]
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    domain = [["picking_type_id.code", "in", codes],
+              ["state", "not in", ["done", "cancel"]],
+              ["scheduled_date", "<", now]]
+    try:
+        rows = gw.search_read("stock.picking", domain,
+                              ["name", "partner_id", "scheduled_date", "state"],
+                              order="scheduled_date asc", limit=100)
+    except Exception as e:                                  # noqa: BLE001
+        return err(f"Lỗi tra phiếu giao/nhận trễ hạn: {e}")
+    if not rows:
+        return ok({"rows": [], "count": 0}, "Không có phiếu giao/nhận nào trễ hạn.")
+    body = "\n".join(
+        f"  {r['name']} | {(r['partner_id'] or [0, '—'])[1]} "
+        f"| hẹn {r['scheduled_date'][:10]} | {r['state']}"
+        for r in rows)
+    return ok({"rows": rows, "count": len(rows)}, f"{len(rows)} phiếu trễ hạn:\n{body}")

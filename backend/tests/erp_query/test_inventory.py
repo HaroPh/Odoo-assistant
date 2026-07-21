@@ -125,3 +125,36 @@ def test_reorder_gateway_error_on_quant_returns_err():
     out = inventory.list_reorder_needed(gw=Gateway(BoomOnQuant()))
     assert out["status"] == "error"
     assert "tồn kho" in out["error"]
+
+
+def test_list_late_deliveries_default_both_directions():
+    rows = [{"name": "WH/OUT/00001", "partner_id": [8, "Wood Corner"],
+             "scheduled_date": "2026-06-23 13:28:37", "state": "assigned"}]
+    gw = _gw(rows)
+    out = inventory.list_late_deliveries(gw=gw)
+    assert out["data"]["count"] == 1
+    model, method, args, kwargs = gw._t.calls[0]
+    assert model == "stock.picking"
+    domain = args[0]
+    assert ["picking_type_id.code", "in", ["outgoing", "incoming"]] in domain
+    assert any(clause[0] == "scheduled_date" and clause[1] == "<" for clause in domain)
+
+
+def test_list_late_deliveries_direction_filters_to_one_code():
+    gw = _gw([])
+    inventory.list_late_deliveries(direction="outgoing", gw=gw)
+    domain = gw._t.calls[0][2][0]
+    assert ["picking_type_id.code", "in", ["outgoing"]] in domain
+
+
+def test_list_late_deliveries_empty_returns_zero_count():
+    out = inventory.list_late_deliveries(gw=_gw([]))
+    assert out["data"]["count"] == 0
+    assert "Không có phiếu" in out["display"]
+
+
+def test_list_late_deliveries_missing_partner_shows_dash():
+    rows = [{"name": "WH/IN/00001", "partner_id": False,
+             "scheduled_date": "2026-06-23 13:28:37", "state": "draft"}]
+    out = inventory.list_late_deliveries(gw=_gw(rows))
+    assert "—" in out["display"]
