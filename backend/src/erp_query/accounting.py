@@ -49,3 +49,46 @@ def get_overdue_invoices(limit=50, *, gw=None):
                      f"| còn {r['amount_residual']:,.0f}" for r in rows)
     return ok({"rows": rows, "count": len(rows)},
               f"{len(rows)} hóa đơn quá hạn:\n{body}")
+
+
+def get_partner_balance(name, *, gw=None):
+    """Công nợ 1 đối tác cụ thể — CẢ hai chiều nếu có: phải thu (khách nợ
+    mình, out_invoice) và phải trả (mình nợ NCC, in_invoice). KHÔNG cộng
+    ròng — 2 loại sổ khác bản chất."""
+    gw = gw or default_gateway()
+    try:
+        partners = gw.search_read("res.partner", [["name", "ilike", name]],
+                                  ["id", "name"], limit=5)
+    except Exception as e:                                  # noqa: BLE001
+        return err(f"Lỗi tra cứu đối tác: {e}")
+    if not partners:
+        return err(f"Không tìm thấy đối tác '{name}'.")
+    if len(partners) > 1:
+        names = "; ".join(f"{p['name']} (ID {p['id']})" for p in partners)
+        return err(f"Có nhiều đối tác khớp '{name}': {names}.")
+    partner = partners[0]
+    try:
+        ar = gw.read_group("account.move",
+                           [["move_type", "=", "out_invoice"], ["state", "=", "posted"],
+                            ["payment_state", "in", ["not_paid", "partial"]],
+                            ["partner_id", "=", partner["id"]]],
+                           ["amount_residual:sum"], ["partner_id"])
+        ap = gw.read_group("account.move",
+                           [["move_type", "=", "in_invoice"], ["state", "=", "posted"],
+                            ["payment_state", "in", ["not_paid", "partial"]],
+                            ["partner_id", "=", partner["id"]]],
+                           ["amount_residual:sum"], ["partner_id"])
+    except Exception as e:                                  # noqa: BLE001
+        return err(f"Lỗi tra công nợ: {e}")
+    ar_amt = ar[0]["amount_residual"] if ar else 0.0
+    ap_amt = ap[0]["amount_residual"] if ap else 0.0
+    if not ar_amt and not ap_amt:
+        return ok({"partner": partner, "receivable": 0.0, "payable": 0.0},
+                  f"{partner['name']}: không còn công nợ nào.")
+    parts = [f"{partner['name']}:"]
+    if ar_amt:
+        parts.append(f"  Khách nợ mình (phải thu): {ar_amt:,.0f}")
+    if ap_amt:
+        parts.append(f"  Mình nợ NCC (phải trả): {ap_amt:,.0f}")
+    return ok({"partner": partner, "receivable": ar_amt, "payable": ap_amt},
+              "\n".join(parts))
