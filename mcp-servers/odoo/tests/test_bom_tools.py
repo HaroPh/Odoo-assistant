@@ -37,13 +37,13 @@ def _fake(monkeypatch, responses):
     return calls
 
 
-# Office Lamp: variant 6, template 6 (probe-verified)
-_LAMP = [{"id": 6, "name": "[FURN_8888] Office Lamp",
-          "product_tmpl_id": [6, "[FURN_8888] Office Lamp"]}]
+# Office Lamp: variant 39, template 24 (id-space collision defense: must differ)
+_LAMP = [{"id": 39, "name": "[FURN_8888] Office Lamp",
+          "product_tmpl_id": [24, "[FURN_8888] Office Lamp"]}]
 COMP_A, COMP_B = 67, 68
 
 
-def _bom(id=9, code="AI-BOM", type="normal", active=True, tmpl=6, batch=1.0):
+def _bom(id=9, code="AI-BOM", type="normal", active=True, tmpl=24, batch=1.0):
     return {"id": id, "code": code, "type": type, "active": active,
             "product_tmpl_id": [tmpl, "x"], "product_qty": batch}
 
@@ -56,27 +56,27 @@ def _line(id, pid, qty, name="comp"):
 
 def test_create_bom_empty_components(monkeypatch):
     calls = _fake(monkeypatch, {})
-    out = _env(fn("create_bom")(6, []))
+    out = _env(fn("create_bom")(39, []))
     assert out["ok"] is False and "nguyên liệu" in out["display"]
     assert calls == []
 
 
 def test_create_bom_nonpositive_batch(monkeypatch):
     calls = _fake(monkeypatch, {})
-    out = _env(fn("create_bom")(6, [{"product_id": COMP_A, "qty": 2}], 0))
+    out = _env(fn("create_bom")(39, [{"product_id": COMP_A, "qty": 2}], 0))
     assert out["ok"] is False and "mỗi mẻ" in out["display"]
     assert calls == []
 
 
 def test_create_bom_component_bad_qty(monkeypatch):
     _fake(monkeypatch, {})
-    out = _env(fn("create_bom")(6, [{"product_id": COMP_A, "qty": 0}]))
+    out = _env(fn("create_bom")(39, [{"product_id": COMP_A, "qty": 0}]))
     assert out["ok"] is False and "số lượng" in out["display"].lower()
 
 
 def test_create_bom_component_is_self(monkeypatch):
     _fake(monkeypatch, {("product.product", "search_read"): _LAMP})
-    out = _env(fn("create_bom")(6, [{"product_id": 6, "qty": 1}]))
+    out = _env(fn("create_bom")(39, [{"product_id": 39, "qty": 1}]))
     assert out["ok"] is False and "chính thành phẩm" in out["display"]
 
 
@@ -92,7 +92,7 @@ def test_create_bom_happy_uses_template_and_tuple_lines(monkeypatch):
         ("mrp.bom", "create"): 9,
         ("mrp.bom", "search_read"): [_bom(code="AI-BOM")],
     })
-    out = _env(fn("create_bom")(6, [{"product_id": COMP_A, "qty": 2},
+    out = _env(fn("create_bom")(39, [{"product_id": COMP_A, "qty": 2},
                                     {"product_id": COMP_B, "qty": 1}],
                                 batch_qty=1.0, code="AI-BOM"))
     assert out["ok"] is True
@@ -100,8 +100,8 @@ def test_create_bom_happy_uses_template_and_tuple_lines(monkeypatch):
     assert out["res_id"] == 9 and out["state"] == "active"
     create = next(c for c in calls if c["method"] == "create")
     vals = create["args"][0]
-    # bẫy id-space: product_tmpl_id lấy từ TEMPLATE (6), không phải variant
-    assert vals["product_tmpl_id"] == 6
+    # bẫy id-space: product_tmpl_id lấy từ TEMPLATE (24), không phải variant (39)
+    assert vals["product_tmpl_id"] == 24
     assert vals["product_qty"] == 1.0
     assert vals["code"] == "AI-BOM"
     # tuple (0,0,{...}) shape đúng, component = variant id
@@ -116,7 +116,7 @@ def test_create_bom_omits_code_when_empty(monkeypatch):
         ("mrp.bom", "create"): 9,
         ("mrp.bom", "search_read"): [_bom(code=False)],
     })
-    out = _env(fn("create_bom")(6, [{"product_id": COMP_A, "qty": 2}]))
+    out = _env(fn("create_bom")(39, [{"product_id": COMP_A, "qty": 2}]))
     assert out["ok"] is True
     create = next(c for c in calls if c["method"] == "create")
     assert "code" not in create["args"][0]     # KHÔNG gửi key code rỗng
