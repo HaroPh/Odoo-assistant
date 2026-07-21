@@ -41,3 +41,9 @@ def test_build_tools_exposes_list_reorder_needed():
 def test_build_tools_exposes_mrp_tools():
     names = {t.name for t in build_erp_query_tools()}
     assert {"get_bom_detail", "list_manufacturing_orders"} <= names
+
+
+def test_build_tools_exposes_tier1_read_tools():
+    names = {t.name for t in build_erp_query_tools()}
+    assert {"list_late_deliveries", "check_po_matching",
+            "list_po_mismatches", "get_partner_balance"} <= names

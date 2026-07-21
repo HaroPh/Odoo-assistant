@@ -136,9 +136,35 @@ def build_erp_query_tools() -> list:
         product lọc theo tên sản phẩm (chuỗi con)."""
         return _json(mrp.list_manufacturing_orders(state or None, product or None))
 
+    @tool
+    def list_late_deliveries(direction: str = "") -> str:
+        """Phiếu giao/nhận đang trễ hạn. direction = 'outgoing' (giao khách) |
+        'incoming' (nhận từ NCC), bỏ trống = cả hai."""
+        return _json(inventory.list_late_deliveries(direction or None))
+
+    @tool
+    def check_po_matching(ref: str) -> str:
+        """Đối soát 1 đơn mua (PO) theo mã: dòng nào đã xuất hóa đơn NHIỀU HƠN
+        thực nhận (kiểm tra trước khi xác nhận hóa đơn NCC)."""
+        return _json(purchase.check_po_matching(ref))
+
+    @tool
+    def list_po_mismatches() -> str:
+        """Mọi đơn mua đang có dòng hóa đơn vượt thực nhận (cần rà soát trước
+        khi thanh toán thêm)."""
+        return _json(purchase.list_po_mismatches())
+
+    @tool
+    def get_partner_balance(name: str) -> str:
+        """Công nợ của MỘT đối tác cụ thể (theo tên) — cả phải thu (nếu là
+        khách) và phải trả (nếu là NCC)."""
+        return _json(accounting.get_partner_balance(name))
+
     return [find_customer, find_supplier, find_product, list_sale_orders,
             get_sale_order_detail, get_product_price, sales_summary, top_products,
             get_stock, get_lots, list_purchase_orders, get_purchase_order_detail,
             list_suppliers, get_product_suppliers, get_supplier_detail,
             list_crm_leads, list_invoices, get_overdue_invoices,
-            list_reorder_needed, get_bom_detail, list_manufacturing_orders]
+            list_reorder_needed, get_bom_detail, list_manufacturing_orders,
+            list_late_deliveries, check_po_matching, list_po_mismatches,
+            get_partner_balance]
