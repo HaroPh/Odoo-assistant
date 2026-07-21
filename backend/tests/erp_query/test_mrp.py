@@ -146,3 +146,42 @@ def test_list_mo_empty():
     out = mrp.list_manufacturing_orders(gw=gw)
     assert out["data"]["rows"] == []
     assert "Không có lệnh sản xuất" in out["display"]
+
+
+def test_get_bom_recipe_shape():
+    gw = _gw({"mrp.bom": [{"id": 9, "code": "AI-BOM", "type": "normal",
+                           "product_qty": 2.0}],
+              "mrp.bom.line": [{"id": 18, "product_id": [67, "Drawer Black"],
+                                "product_qty": 5.0},
+                               {"id": 19, "product_id": [68, "Case"],
+                                "product_qty": 1.0}]})
+    out = mrp.get_bom_recipe(9, gw=gw)
+    assert out["status"] == "success"
+    assert out["data"]["bom"]["code"] == "AI-BOM"
+    assert out["data"]["bom"]["product_qty"] == 2.0
+    assert out["data"]["lines"][0] == {"product_id": 67, "name": "Drawer Black",
+                                       "qty": 5.0}
+    line_call = next(c for c in gw._t.calls if c[0] == "mrp.bom.line")
+    assert ["bom_id", "=", 9] in line_call[2][0]
+
+
+def test_get_bom_recipe_not_found():
+    gw = _gw({"mrp.bom": []})
+    out = mrp.get_bom_recipe(999, gw=gw)
+    assert out["status"] == "error" and "Không tìm thấy BoM" in out["error"]
+
+
+def test_open_mo_count_domain_and_value():
+    gw = _gw({"mrp.production": [{"id": 12}, {"id": 13}]})
+    out = mrp.open_mo_count_for_bom(9, gw=gw)
+    assert out["status"] == "success"
+    assert out["data"]["count"] == 2 and out["data"]["capped"] is False
+    call = gw._t.calls[0]
+    assert ["bom_id", "=", 9] in call[2][0]
+    assert ["state", "in", ["draft", "confirmed", "progress", "to_close"]] in call[2][0]
+
+
+def test_open_mo_count_capped_at_100():
+    gw = _gw({"mrp.production": [{"id": i} for i in range(100)]})
+    out = mrp.open_mo_count_for_bom(9, gw=gw)
+    assert out["data"]["count"] == 100 and out["data"]["capped"] is True

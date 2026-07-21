@@ -166,3 +166,44 @@ def list_manufacturing_orders(state=None, product=None, limit=20, *, gw=None):
         for r in rows)
     return ok({"rows": rows, "count": len(rows)},
               f"{len(rows)} lệnh sản xuất:\n{body}")
+
+
+def get_bom_recipe(bom_id, *, gw=None):
+    """NỘI BỘ (coordinator update_bom dựng diff) — recipe hiện tại của 1 BoM."""
+    gw = gw or default_gateway()
+    try:
+        brows = gw.search_read("mrp.bom", [["id", "=", bom_id]],
+                               ["id", "code", "type", "product_qty"], limit=1)
+    except Exception as e:                                  # noqa: BLE001
+        return err(f"Lỗi tra cứu định mức: {e}")
+    if not brows:
+        return err(f"Không tìm thấy BoM {bom_id}.")
+    try:
+        lines = gw.search_read("mrp.bom.line", [["bom_id", "=", bom_id]],
+                               ["product_id", "product_qty"], limit=100)
+    except Exception as e:                                  # noqa: BLE001
+        return err(f"Lỗi tra cứu định mức: {e}")
+    b = brows[0]
+    return ok({"bom": {"id": b["id"], "code": b.get("code") or None,
+                       "type": b["type"], "product_qty": b["product_qty"]},
+               "lines": [{"product_id": l["product_id"][0],
+                          "name": l["product_id"][1], "qty": l["product_qty"]}
+                         for l in lines]},
+              f"{len(lines)} nguyên liệu.")
+
+
+def open_mo_count_for_bom(bom_id, *, gw=None):
+    """NỘI BỘ (coordinator update_bom cảnh báo blast-radius) — số MO đang mở
+    trỏ vào BoM này. Đếm qua search_read limit 100 CÓ Ý THỨC: capped=True khi
+    chạm trần → hiển thị '100+' (khác truncation ngầm — đây là đếm có cap)."""
+    gw = gw or default_gateway()
+    try:
+        rows = gw.search_read("mrp.production",
+                              [["bom_id", "=", bom_id],
+                               ["state", "in", ["draft", "confirmed",
+                                                "progress", "to_close"]]],
+                              ["id"], limit=100)
+    except Exception as e:                                  # noqa: BLE001
+        return err(f"Lỗi tra cứu lệnh sản xuất: {e}")
+    return ok({"count": len(rows), "capped": len(rows) >= 100},
+              f"{len(rows)} lệnh sản xuất đang mở.")
