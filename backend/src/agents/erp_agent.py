@@ -75,7 +75,14 @@ def _pending_kind(snapshot) -> str | None:
 
 
 def _pending_options(snapshot) -> list:
-    """Candidate options of a parked option-bearing interrupt (else [])."""
+    """Candidate options of a parked option-bearing interrupt (else []).
+
+    "next_action" is no longer produced by continuation.py (round 7: the
+    blocking next-step menu was replaced by a non-blocking suggestion) —
+    kept here so a conversation checkpointed mid-menu BEFORE that deploy
+    still resumes correctly instead of erroring. Safe to delete once no
+    such in-flight checkpoint can remain (e.g. after the checkpointer's
+    retention window has passed)."""
     for task in getattr(snapshot, "tasks", ()) or ():
         for it in getattr(task, "interrupts", ()) or ():
             value = getattr(it, "value", None)
@@ -101,6 +108,7 @@ async def _decide_resume(kind, options, question, reply, llm):
             return question or "Vui lòng chọn một mục trong danh sách."
         return Command(resume=chosen)
     if kind == "next_action":
+        # No longer produced going forward (round 7) — see _pending_options.
         chosen = parse_selection(reply, options)
         if chosen is not None:
             return Command(resume=chosen)
