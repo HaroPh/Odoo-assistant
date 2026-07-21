@@ -269,6 +269,34 @@ async def test_update_bom_add_existing_msg(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_update_bom_duplicate_add_same_component_rejected(monkeypatch):
+    # shown≠written bug (found in final whole-branch review): two `add`
+    # changes for the SAME new component in one request must be rejected —
+    # by_pid is a static snapshot of the recipe BEFORE the loop, so without
+    # tracking pids added earlier in this same call, both would silently
+    # pass validation and the tool would be asked to create 2 lines for 1
+    # component while the confirm draft (dict, last-write-wins) shows only 1.
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
+    _boms(monkeypatch, [_PRIM])
+    _recipe(monkeypatch, [{"product_id": 67, "name": "Drawer Black", "qty": 2.0}])
+    _mo_count(monkeypatch, 0)
+    monkeypatch.setattr(bw.inventory, "find_product",
+                        lambda ref, *a, **k: (_ok_resolve(_LAMP, False)
+                                              if "lamp" in ref.lower()
+                                              else _ok_resolve([{"id": 31, "name": "Office Chair Black", "score": 1}], False)))
+    rec = {}
+    graph = _graph(bw.make_update_bom_node([_fake_tool("update_bom_lines", rec)]))
+    cfg = {"configurable": {"thread_id": "ub7"}}
+    res = await graph.ainvoke(_state("update_bom_lines", {
+        "product_name": "Office Lamp",
+        "changes": [{"action": "add", "product": "Office Chair Black", "qty": 2},
+                   {"action": "add", "product": "Office Chair Black", "qty": 3}]}), cfg)
+    assert "__interrupt__" not in res
+    assert "đã có" in res["messages"][-1].content
+    assert rec == {}
+
+
+@pytest.mark.asyncio
 async def test_update_bom_multi_bom_code_selects(monkeypatch):
     monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
     _boms(monkeypatch, [_PRIM, {"id": 10, "code": "SEC", "type": "normal", "product_qty": 1.0}])

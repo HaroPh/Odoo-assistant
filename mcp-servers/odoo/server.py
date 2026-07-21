@@ -1378,18 +1378,22 @@ def update_bom_lines(bom_id: int, changes: list) -> str:
                      {"fields": ["id", "product_id", "product_qty"], "limit": 100})
         by_pid = {l["product_id"][0]: l for l in lines}
         remaining = set(by_pid)          # theo dõi xóa hết
+        added_this_call = set()          # bắt add trùng trong CÙNG 1 request
         ops = []
         for ch in changes:
             action = ch.get("action")
             pid = ch.get("product_id")
             qty = ch.get("qty")
             if action == "add":
-                if pid in by_pid:
+                if pid in by_pid or pid in added_this_call:
                     return envelope(False, f"Nguyên liệu ID {pid} đã có trong "
-                                           f"BoM — dùng set_qty để đổi số lượng.")
+                                           f"BoM (hoặc đã được thêm ở một thay "
+                                           f"đổi khác trong cùng yêu cầu này) — "
+                                           f"dùng set_qty để đổi số lượng.")
                 if (qty or 0) <= 0:
                     return envelope(False, "Số lượng thêm phải lớn hơn 0.")
                 ops.append((0, 0, {"product_id": pid, "product_qty": float(qty)}))
+                added_this_call.add(pid)
             elif action == "set_qty":
                 if pid not in by_pid:
                     return envelope(False, f"Nguyên liệu ID {pid} chưa có trong "

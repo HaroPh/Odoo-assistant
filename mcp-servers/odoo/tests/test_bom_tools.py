@@ -194,6 +194,22 @@ def test_update_bom_happy_builds_correct_ops(monkeypatch):
     assert len(ops) == 3          # MỘT lệnh write, 3 op
 
 
+def test_update_bom_duplicate_add_same_component_rejected(monkeypatch):
+    # shown≠written bug (found in final whole-branch review): two `add` ops
+    # for the SAME new component in one request must not both reach write() —
+    # by_pid is a static snapshot from before the loop, so a naive check lets
+    # both through, silently creating 2 lines for 1 component.
+    calls = _fake(monkeypatch, {
+        ("mrp.bom", "search_read"): [_bom()],
+        ("mrp.bom.line", "search_read"): [_line(18, COMP_A, 2.0, "Drawer Black")],
+    })
+    out = _env(fn("update_bom_lines")(9, [
+        {"action": "add", "product_id": 31, "qty": 2},
+        {"action": "add", "product_id": 31, "qty": 3}]))
+    assert out["ok"] is False and "đã có" in out["display"]
+    assert not any(c["method"] == "write" for c in calls)
+
+
 def test_update_bom_unknown_action(monkeypatch):
     _fake(monkeypatch, {
         ("mrp.bom", "search_read"): [_bom()],

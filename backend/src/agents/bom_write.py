@@ -196,6 +196,7 @@ def make_update_bom_node(tools):
         # Resolve từng change + validate all-or-nothing (câu lỗi thân thiện
         # phía coordinator; MCP tool validate lại — defense in depth).
         changes, after = [], {pid: dict(l) for pid, l in by_pid.items()}
+        added_this_call = set()   # bắt add trùng trong CÙNG 1 request (shown≠written)
         for ch in raw_changes:
             action = str(ch.get("action") or "").strip().lower()
             ref = str(ch.get("product") or "").strip()
@@ -217,10 +218,12 @@ def make_update_bom_node(tools):
                 if q <= 0:
                     return _msg(f"Số lượng cho '{comp['name']}' phải lớn hơn 0.")
             if action == "add":
-                if pid in by_pid:
-                    return _msg(f"'{comp['name']}' đã có trong BoM — dùng "
-                                f"'đổi số lượng' thay vì thêm.")
+                if pid in by_pid or pid in added_this_call:
+                    return _msg(f"'{comp['name']}' đã có trong BoM (hoặc đã "
+                                f"được thêm ở một thay đổi khác trong cùng yêu "
+                                f"cầu này) — dùng 'đổi số lượng' thay vì thêm.")
                 after[pid] = {"product_id": pid, "name": comp["name"], "qty": q}
+                added_this_call.add(pid)
             elif action == "set_qty":
                 if pid not in by_pid:
                     names = ", ".join(l["name"] for l in cur)
