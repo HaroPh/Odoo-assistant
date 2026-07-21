@@ -44,6 +44,10 @@ def _make_search_documents_tool(collected: list):
         result = await asyncio.to_thread(retrieve, query)
         if result.is_empty() or not passes_floor(result):
             return "Không tìm thấy tài liệu liên quan."
+        # Assumes sequential tool calls (ReAct-style) — two concurrent calls
+        # would both snapshot the same `start` and collide. Degrades safely
+        # via extract_used_citations()'s fallback (never crashes, never
+        # cites zero) if that assumption is ever broken.
         start = len(collected) + 1
         collected.extend(result.chunks)
         return _format_context(result.chunks, start=start)

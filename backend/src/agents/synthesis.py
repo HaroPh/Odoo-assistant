@@ -17,6 +17,9 @@ SENTINEL = "KHÔNG_ĐỦ_THÔNG_TIN"
 GUARD_MSG = "Không tìm thấy tài liệu liên quan đến câu hỏi này."
 SAFE_MSG = "Xin lỗi, tính năng tra cứu tài liệu tạm thời gặp sự cố. Vui lòng thử lại sau."
 USED_MARKER = "NGUỒN_DÙNG"
+# Marker is contractually the LAST line of the answer — extract_used_citations()
+# discards everything from the match onward, so any trailing text after it
+# (there shouldn't be any) is dropped along with the marker itself.
 _MARKER_RE = re.compile(rf'\n?{USED_MARKER}:\s*([0-9,\s]*)', re.IGNORECASE)
 
 
