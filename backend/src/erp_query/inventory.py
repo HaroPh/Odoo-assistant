@@ -119,7 +119,8 @@ def list_late_deliveries(direction=None, *, gw=None):
         return err(f"Lỗi tra phiếu giao/nhận trễ hạn: {e}")
     if not rows:
         return ok({"rows": [], "count": 0, "capped": False}, "Không có phiếu giao/nhận nào trễ hạn.")
-    # Display only first 15 rows for LLM readability, but keep full count and rows in data
+    # Cap both display and data["rows"] to first 15 for LLM token efficiency;
+    # keep data["count"] as true total (may be > len(data["rows"]) when capped)
     display_rows = rows[:15]
     body = "\n".join(
         f"  {r['name']} | {(r['partner_id'] or [0, '—'])[1]} "
@@ -130,4 +131,4 @@ def list_late_deliveries(direction=None, *, gw=None):
     if count > 15:
         display_text += f"\n...và {count - 15} phiếu khác."
     capped = len(rows) >= 100
-    return ok({"rows": rows, "count": count, "capped": capped}, display_text)
+    return ok({"rows": display_rows, "count": count, "capped": capped}, display_text)

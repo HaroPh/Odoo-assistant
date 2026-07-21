@@ -168,9 +168,9 @@ def test_list_late_deliveries_caps_display_at_15_rows():
         for i in range(20)
     ]
     out = inventory.list_late_deliveries(gw=_gw(rows))
-    # Full data should contain all 20
+    # Count should reflect true total, but data["rows"] capped at 15
     assert out["data"]["count"] == 20
-    assert len(out["data"]["rows"]) == 20
+    assert len(out["data"]["rows"]) == 15
     # Display should only show first 15 + truncation note
     display = out["display"]
     assert "20 phiếu trễ hạn:" in display
@@ -218,6 +218,7 @@ def test_list_late_deliveries_capped_true_at_100_rows():
     ]
     out = inventory.list_late_deliveries(gw=_gw(rows))
     assert out["data"]["count"] == 100
+    assert len(out["data"]["rows"]) == 15  # data["rows"] capped at 15
     assert out["data"]["capped"] is True
     # Display should still only show first 15, plus truncation note
     display = out["display"]
