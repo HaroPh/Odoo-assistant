@@ -152,3 +152,74 @@ def test_get_supplier_detail_not_found():
     t = MultiModelTransport({("res.partner", "name_search"): []})
     out = purchase.get_supplier_detail("Không tồn tại", gw=Gateway(t))
     assert out["status"] == "error"
+
+
+def test_check_po_matching_not_found():
+    out = purchase.check_po_matching("P99999", gw=_gw([]))
+    assert "Không tìm thấy" in out["display"]
+
+
+def test_check_po_matching_duplicate_name():
+    orders = [{"id": 1, "name": "P00001", "partner_id": [1, "A"]},
+              {"id": 2, "name": "P00001", "partner_id": [2, "B"]}]
+    out = purchase.check_po_matching("P00001", gw=_gw(orders))
+    assert "nhiều đơn mua" in out["display"]
+
+
+def test_check_po_matching_flags_invoiced_over_received():
+    order_rows = [{"id": 72, "name": "P00072", "partner_id": [11, "Ready Mat"]}]
+    line_rows = [{"product_id": [21, "Storage Box"], "product_qty": 5.0,
+                  "qty_received": 2.0, "qty_invoiced": 3.0}]
+
+    class TwoCallTransport:
+        def __init__(self): self.calls = []
+        def call(self, model, method, args, kwargs):
+            self.calls.append((model, method, args, kwargs))
+            return order_rows if model == "purchase.order" else line_rows
+
+    gw = Gateway(TwoCallTransport())
+    out = purchase.check_po_matching("P00072", gw=gw)
+    assert out["data"]["mismatch_count"] == 1
+    assert "⚠" in out["display"]
+
+
+def test_check_po_matching_partial_receipt_not_a_mismatch():
+    # đang nhận dở (product_qty=5, mới nhận 2, CHƯA có hóa đơn) — KHÔNG lệch.
+    order_rows = [{"id": 72, "name": "P00072", "partner_id": [11, "Ready Mat"]}]
+    line_rows = [{"product_id": [21, "Storage Box"], "product_qty": 5.0,
+                  "qty_received": 2.0, "qty_invoiced": 0.0}]
+
+    class TwoCallTransport:
+        def __init__(self): self.calls = []
+        def call(self, model, method, args, kwargs):
+            self.calls.append((model, method, args, kwargs))
+            return order_rows if model == "purchase.order" else line_rows
+
+    gw = Gateway(TwoCallTransport())
+    out = purchase.check_po_matching("P00072", gw=gw)
+    assert out["data"]["mismatch_count"] == 0
+    assert "khớp" in out["display"]
+
+
+def test_list_po_mismatches_domain_prefilters_invoiced():
+    gw = _gw([])
+    purchase.list_po_mismatches(gw=gw)
+    model, method, args, kwargs = gw._t.calls[0]
+    assert model == "purchase.order.line"
+    domain = args[0]
+    assert ["qty_invoiced", ">", 0] in domain
+
+
+def test_list_po_mismatches_groups_by_po():
+    lines = [{"order_id": [5, "P00005"], "product_id": [1, "A"],
+              "product_qty": 2.0, "qty_received": 1.0, "qty_invoiced": 2.0},
+             {"order_id": [5, "P00005"], "product_id": [2, "B"],
+              "product_qty": 3.0, "qty_received": 1.0, "qty_invoiced": 3.0}]
+    out = purchase.list_po_mismatches(gw=_gw(lines))
+    assert out["data"]["count"] == 1          # 2 dòng lệch, CÙNG 1 PO
+
+
+def test_list_po_mismatches_none_found():
+    out = purchase.list_po_mismatches(gw=_gw([]))
+    assert out["data"]["count"] == 0
+    assert "Không có đơn mua nào" in out["display"]

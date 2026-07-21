@@ -164,3 +164,63 @@ def get_supplier_detail(name, *, gw=None):
               f"  Điều khoản thanh toán: {term[1] if term else '—'}\n"
               f"  Số đơn mua đã có: {len(pos)}")
     return ok({"partner": p, "bank_accounts": banks, "po_count": len(pos)}, display)
+
+
+def check_po_matching(ref, *, gw=None):
+    """Đối soát 1 PO theo mã: dòng nào đã xuất hóa đơn NHIỀU HƠN thực nhận
+    (SOP 15 — kiểm tra trước khi confirm vendor bill). Nhận-chưa-hóa-đơn
+    hoặc chưa-nhận-đủ là bình thường (đơn đang xử lý dở), KHÔNG tính là
+    lệch."""
+    gw = gw or default_gateway()
+    try:
+        pos = gw.search_read("purchase.order", [["name", "=", ref]],
+                             ["id", "name", "partner_id"], limit=2)
+        if not pos:
+            return err(f"Không tìm thấy đơn mua '{ref}'.")
+        if len(pos) > 1:
+            return err(f"Có nhiều đơn mua tên '{ref}'.")
+        po = pos[0]
+        lines = gw.search_read("purchase.order.line", [["order_id", "=", po["id"]]],
+                               ["product_id", "product_qty", "qty_received", "qty_invoiced"],
+                               order="id asc", limit=100)
+    except Exception as e:                                  # noqa: BLE001
+        return err(f"Lỗi đối soát đơn mua: {e}")
+    if not lines:
+        return err(f"Đơn mua '{ref}' không có dòng sản phẩm nào.")
+    mismatches = [l for l in lines if l["qty_invoiced"] > l["qty_received"]]
+    line_txt = "\n".join(
+        f"  {(l['product_id'] or [0, 'N/A'])[1]} | đặt {l['product_qty']:g} "
+        f"| nhận {l['qty_received']:g} | hóa đơn {l['qty_invoiced']:g}"
+        + ("  ⚠ hóa đơn nhiều hơn thực nhận" if l["qty_invoiced"] > l["qty_received"] else "")
+        for l in lines)
+    header = (f"Đơn mua {po['name']} | {(po['partner_id'] or [0, 'N/A'])[1]}: "
+              + (f"{len(mismatches)} dòng LỆCH (hóa đơn > thực nhận)"
+                 if mismatches else "khớp — không có dòng nào hóa đơn vượt thực nhận"))
+    return ok({"order": po, "lines": lines, "mismatch_count": len(mismatches)},
+              f"{header}\n{line_txt}")
+
+
+def list_po_mismatches(*, gw=None):
+    """Mọi PO đang mở/đã xong (state purchase|done) có ít nhất 1 dòng hóa
+    đơn NHIỀU HƠN thực nhận — cần rà soát trước khi thanh toán thêm."""
+    gw = gw or default_gateway()
+    try:
+        lines = gw.search_read("purchase.order.line",
+                               [["order_id.state", "in", ["purchase", "done"]],
+                                ["qty_invoiced", ">", 0]],
+                               ["order_id", "product_id", "product_qty",
+                                "qty_received", "qty_invoiced"],
+                               order="order_id asc", limit=500)
+    except Exception as e:                                  # noqa: BLE001
+        return err(f"Lỗi tra đơn mua lệch đối soát: {e}")
+    bad = [l for l in lines if l["qty_invoiced"] > l["qty_received"]]
+    if not bad:
+        return ok({"rows": [], "count": 0},
+                  "Không có đơn mua nào có hóa đơn vượt thực nhận.")
+    seen_pos = {l["order_id"][0]: l["order_id"][1] for l in bad}
+    lines_txt = "\n".join(
+        f"  {l['order_id'][1]} | {(l['product_id'] or [0, 'N/A'])[1]} "
+        f"| nhận {l['qty_received']:g} | hóa đơn {l['qty_invoiced']:g}"
+        for l in bad)
+    return ok({"rows": bad, "count": len(seen_pos)},
+              f"{len(seen_pos)} đơn mua có dòng hóa đơn vượt thực nhận:\n{lines_txt}")
