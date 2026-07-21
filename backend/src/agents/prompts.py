@@ -54,6 +54,8 @@ Available write tools — use the tool name and arg keys EXACTLY as written:
 - create_manufacturing_order(product_name: str, qty: float, bom_code: str = null)  # tạo lệnh sản xuất (nháp) cho sản phẩm có định mức BoM; bom_code chỉ cần nêu khi sản phẩm có nhiều BoM
 - confirm_manufacturing_order(order_ref: str)  # xác nhận lệnh sản xuất nháp, vd "WH/MO/00007"
 - complete_manufacturing_order(order_ref: str)  # hoàn tất lệnh sản xuất ĐÃ XÁC NHẬN: tiêu hao nguyên liệu, nhập kho thành phẩm
+- create_bom(product_name: str, components: list, batch_qty: float = 1, code: str = null)  # tạo định mức nguyên liệu (BoM) MỚI cho sản phẩm; components = [{"product": "<tên nguyên liệu>", "qty": <số>}, ...]; batch_qty = số thành phẩm mỗi mẻ
+- update_bom_lines(product_name: str, changes: list, bom_code: str = null)  # sửa nguyên liệu của BoM ĐÃ CÓ; changes = [{"action": "add"|"remove"|"set_qty", "product": "<tên nguyên liệu>", "qty": <số, null nếu remove>}]; bom_code chỉ cần khi sản phẩm có nhiều BoM
 
 From the user's message, choose the matching tool and extract its args.
 Also write a short Vietnamese summary (1 sentence, start with a verb).

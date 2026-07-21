@@ -10,6 +10,7 @@ from .edit_order import make_edit_order_node, SALE_EDIT_CFG, PURCHASE_EDIT_CFG
 from .inventory_write import make_inventory_node
 from .crm_write import make_create_lead_node, make_convert_lead_node, make_log_activity_node
 from .mrp_write import make_create_mo_node
+from .bom_write import make_create_bom_node, make_update_bom_node
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,8 @@ WRITE_COORDINATORS = {
     "convert_lead": Spec("crm_convert_lead", lambda llm, tools: make_convert_lead_node(tools)),
     "log_activity": Spec("crm_log_activity", lambda llm, tools: make_log_activity_node(tools)),
     "create_manufacturing_order": Spec("create_mo", lambda llm, tools: make_create_mo_node(tools)),
+    "create_bom":       Spec("create_bom", lambda llm, tools: make_create_bom_node(tools)),
+    "update_bom_lines": Spec("update_bom", lambda llm, tools: make_update_bom_node(tools)),
 }
 
 COORDINATED_TOOLS = frozenset(WRITE_COORDINATORS)
