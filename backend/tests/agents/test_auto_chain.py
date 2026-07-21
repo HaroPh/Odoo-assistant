@@ -180,13 +180,12 @@ async def test_auto_proceed_keeps_rest_of_queue():
 
 
 @pytest.mark.asyncio
-async def test_head_mismatch_falls_back_to_menu():
+async def test_head_mismatch_falls_back_to_suggestion():
     graph, cfg = _cgraph(), {"configurable": {"thread_id": "a3"}}
     res = await graph.ainvoke(_cstate(_lw(), ["deliver_order"]), cfg)
-    itr = res["__interrupt__"][0].value       # menu, NOT auto-run of wrong step
-    assert itr["kind"] == "next_action"
-    res = await graph.ainvoke(Command(resume=False), cfg)
+    assert "__interrupt__" not in res         # suggestion, NOT auto-run of wrong step
     assert res["auto_chain"] is None
+    assert "Xác nhận báo giá" in res["messages"][-1].content
 
 
 @pytest.mark.asyncio
@@ -370,17 +369,12 @@ async def test_two_step_chain_one_confirm_end_to_end(monkeypatch):
     assert rec == []                                  # chưa write gì
 
     # Resume "có": create chạy → continuation auto-proceed (KHÔNG interrupt)
-    # → executor confirm chạy → continuation: queue hết → menu bước kế (Giao hàng)
+    # → executor confirm chạy → continuation: queue hết → suggestion bước kế (Giao hàng)
     res = await graph.ainvoke(Command(resume=True), cfg)
     assert [n for n, _ in rec] == ["create_quotation", "confirm_sale_order"]
     assert rec[1][1] == {"order_ref": "S00099"}       # args từ registry lambda
-    itr = res["__interrupt__"][0].value
-    assert itr["kind"] == "next_action"
-    assert "Giao hàng" in itr["question"]             # menu chỉ hiện SAU chuỗi
-
-    # Dừng tại menu
-    res = await graph.ainvoke(Command(resume=False), cfg)
-    assert res["messages"][-1].content == "Đã dừng tại đây."
+    assert "__interrupt__" not in res                 # no interrupt, suggestion instead
+    assert "Giao hàng" in res["messages"][-1].content  # suggestion chỉ hiện SAU chuỗi
     assert res["auto_chain"] is None
 
 

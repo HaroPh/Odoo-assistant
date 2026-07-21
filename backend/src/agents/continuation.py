@@ -1,20 +1,19 @@
 # backend/src/agents/continuation.py
-"""Write-continuation: after any write, offer the next linear step from
-NEXT_STEPS as a menu (interrupt kind="next_action"). "Proceed" loads the next
-action into pending_action/confirmed=True and the graph loops back to the
-executor — the menu IS the confirmation for that next action (no double
-confirm). Cross-cutting node, not a per-flow coordinator; deterministic (no
-LLM). Sole consumer of last_write: returns last_write=None on EVERY branch,
-so a stale handle can never re-offer an old record's next step. Khi auto_chain
-còn bước khớp NEXT_STEPS, bước kế tự chạy không interrupt — confirm đầu chuỗi
-đã cover."""
+"""Write-continuation: after any write, append a non-blocking, deterministic
+suggestion for the next linear step from NEXT_STEPS to the reply — never an
+interrupt. If the user follows up on it in a later message, that message
+goes through the normal write-planner confirm gate like any other request
+(no shortcut). Cross-cutting node, not a per-flow coordinator; deterministic
+(no LLM). Sole consumer of last_write: returns last_write=None on EVERY
+branch, so a stale handle can never re-offer an old record's next step. Khi
+auto_chain còn bước khớp NEXT_STEPS, bước kế tự chạy không interrupt — user
+đã tự khai báo cả chuỗi trong 1 câu, mức đồng ý mạnh hơn 1 gợi ý bình
+thường."""
 
 from langchain_core.messages import AIMessage
 from langgraph.graph import END
-from langgraph.types import interrupt as _interrupt
 
 from .state import ERPAgentState
-from .create_order import _ttl_expiry
 from .write_registry import NEXT_STEPS
 
 
@@ -45,19 +44,9 @@ def make_write_continuation_node():
                         "confirmed": True, "last_write": None,
                         "auto_chain": queue[1:] or None}
 
-        question = (f"{lw['display']}\n\nTiếp theo bạn có muốn:\n"
-                    f"• {step.label}\n• Dừng")
-        proceed = _interrupt({"kind": "next_action", "question": question,
-                              "options": [{"id": True, "name": step.label},
-                                          {"id": False, "name": "Dừng"}],
-                              "expires_at": _ttl_expiry()})
-        if not proceed:
-            return {"pending_action": None, "confirmed": None, "last_write": None,
-                    "auto_chain": None,
-                    "messages": [AIMessage(content="Đã dừng tại đây.")]}
-        return {"pending_action": {"tool": step.tool, "args": step.args(lw),
-                                   "summary": step.label},
-                "confirmed": True, "last_write": None, "auto_chain": None}
+        suggestion = f"{lw['display']}\n\n(Bạn có thể yêu cầu \"{step.label}\" bất cứ lúc nào.)"
+        return {"pending_action": None, "confirmed": None, "last_write": None,
+                "auto_chain": None, "messages": [AIMessage(content=suggestion)]}
 
     return write_continuation
 
