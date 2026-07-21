@@ -253,3 +253,25 @@ def test_list_po_mismatches_capped_true_at_limit():
     assert "có thể còn nhiều hơn — đã đạt giới hạn 100 dòng" in out["display"]
     # Should report 10 unique POs
     assert out["data"]["count"] == 10
+
+
+def test_list_po_mismatches_capped_true_no_mismatches():
+    """When fetched rows == 100 but NONE are mismatches, capped still warns (previously uncovered)."""
+    # Create exactly 100 rows with NO mismatches (qty_invoiced <= qty_received)
+    lines = []
+    for i in range(100):
+        po_id = 2000 + (i // 10)  # 10 POs with 10 lines each
+        lines.append({
+            "order_id": [po_id, f"P{po_id:05d}"],
+            "product_id": [i + 1, f"Product_{i}"],
+            "product_qty": 10.0,
+            "qty_received": 8.0,
+            "qty_invoiced": 6.0  # ALL good — no mismatches
+        })
+    out = purchase.list_po_mismatches(gw=_gw(lines))
+    assert out["data"]["capped"] is True
+    assert out["data"]["count"] == 0
+    assert "Không có đơn mua nào có hóa đơn vượt thực nhận." in out["display"]
+    # This is the critical assertion: even though NO mismatches found, the warning
+    # MUST be present because the audit was capped at 100 rows
+    assert "có thể còn nhiều hơn — đã đạt giới hạn 100 dòng" in out["display"]

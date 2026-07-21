@@ -218,8 +218,10 @@ def list_po_mismatches(*, gw=None):
     capped = len(lines) >= 100
     bad = [l for l in lines if l["qty_invoiced"] > l["qty_received"]]
     if not bad:
-        return ok({"rows": [], "count": 0, "capped": capped},
-                  "Không có đơn mua nào có hóa đơn vượt thực nhận.")
+        msg = "Không có đơn mua nào có hóa đơn vượt thực nhận."
+        if capped:
+            msg += " (có thể còn nhiều hơn — đã đạt giới hạn 100 dòng)"
+        return ok({"rows": [], "count": 0, "capped": capped}, msg)
     seen_pos = {l["order_id"][0]: l["order_id"][1] for l in bad}
     lines_txt = "\n".join(
         f"  {l['order_id'][1]} | {(l['product_id'] or [0, 'N/A'])[1]} "
