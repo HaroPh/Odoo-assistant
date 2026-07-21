@@ -1302,6 +1302,122 @@ def complete_manufacturing_order(order_ref: str) -> str:
         return envelope(False, f"Lỗi khi hoàn tất lệnh sản xuất: {e}")
 
 
+@mcp.tool()
+def create_bom(product_id: int, components: list, batch_qty: float = 1.0,
+               code: str = "") -> str:
+    """Tạo định mức nguyên liệu (mrp.bom, type 'normal') MỚI cho một sản phẩm.
+    Nhận ID ĐÃ resolve (coordinator lo resolve tên). YÊU CẦU XÁC NHẬN từ người
+    dùng trước khi gọi.
+
+    Args:
+        product_id: ID sản phẩm thành phẩm (product.product).
+        components: [{"product_id": <id nguyên liệu>, "qty": <số>}, ...].
+        batch_qty: Số thành phẩm mỗi mẻ (mặc định 1).
+        code: Mã tham chiếu BoM (tùy chọn).
+    """
+    try:
+        components = components or []
+        if not components:
+            return envelope(False, "Vui lòng cho biết nguyên liệu và số lượng.")
+        if batch_qty is None or batch_qty <= 0:
+            return envelope(False, "Số lượng mỗi mẻ phải lớn hơn 0.")
+        for c in components:
+            if not c.get("product_id") or (c.get("qty") or 0) <= 0:
+                return envelope(False, "Mỗi nguyên liệu cần ID và số lượng > 0.")
+            if c["product_id"] == product_id:
+                return envelope(False, "Nguyên liệu không thể là chính thành phẩm.")
+        prows = odoo("product.product", "search_read",
+                     [[["id", "=", product_id]]],
+                     {"fields": ["id", "name", "product_tmpl_id"], "limit": 1})
+        if not prows:
+            return envelope(False, f"Không tìm thấy sản phẩm ID {product_id}.")
+        product = prows[0]
+        # mrp.bom link theo TEMPLATE id (bẫy id-space round 4).
+        tmpl_id = product["product_tmpl_id"][0]
+        vals = {"product_tmpl_id": tmpl_id, "product_qty": float(batch_qty),
+                "bom_line_ids": [(0, 0, {"product_id": c["product_id"],
+                                         "product_qty": float(c["qty"])})
+                                 for c in components]}
+        if code:
+            vals["code"] = code
+        bom_id = odoo("mrp.bom", "create", [vals])
+        bom = odoo("mrp.bom", "search_read", [[["id", "=", bom_id]]],
+                   {"fields": ["id", "code"], "limit": 1})[0]
+        label = bom.get("code") or f"BoM #{bom_id}"
+        return envelope(True,
+                        f"Đã tạo BoM {label} cho {product['name']}: "
+                        f"{len(components)} nguyên liệu (mẻ {batch_qty:g}).",
+                        ref=label, model="mrp.bom", res_id=bom_id, state="active")
+    except Exception as e:  # noqa: BLE001
+        return envelope(False, f"Lỗi khi tạo BoM: {e}")
+
+
+@mcp.tool()
+def update_bom_lines(bom_id: int, changes: list) -> str:
+    """Sửa danh sách nguyên liệu của một BoM ĐÃ CÓ (type 'normal'). Mỗi change:
+    {"action": "add"|"remove"|"set_qty", "product_id": <id>, "qty": <số|None>}.
+    Validate toàn bộ trước khi ghi (all-or-nothing). YÊU CẦU XÁC NHẬN trước.
+
+    Args:
+        bom_id: ID định mức (mrp.bom).
+        changes: Danh sách thay đổi nguyên liệu.
+    """
+    try:
+        changes = changes or []
+        if not changes:
+            return envelope(False, "Vui lòng cho biết thay đổi cần áp dụng.")
+        brows = odoo("mrp.bom", "search_read", [[["id", "=", bom_id]]],
+                     {"fields": ["id", "code", "type", "active"], "limit": 1})
+        if not brows or not brows[0]["active"]:
+            return envelope(False, f"Không tìm thấy BoM {bom_id}.")
+        bom = brows[0]
+        if bom["type"] != "normal":
+            return envelope(False, "BoM này là Kit — ngoài phạm vi sửa.")
+        label = bom.get("code") or f"BoM #{bom_id}"
+        lines = odoo("mrp.bom.line", "search_read", [[["bom_id", "=", bom_id]]],
+                     {"fields": ["id", "product_id", "product_qty"], "limit": 100})
+        by_pid = {l["product_id"][0]: l for l in lines}
+        remaining = set(by_pid)          # theo dõi xóa hết
+        ops = []
+        for ch in changes:
+            action = ch.get("action")
+            pid = ch.get("product_id")
+            qty = ch.get("qty")
+            if action == "add":
+                if pid in by_pid:
+                    return envelope(False, f"Nguyên liệu ID {pid} đã có trong "
+                                           f"BoM — dùng set_qty để đổi số lượng.")
+                if (qty or 0) <= 0:
+                    return envelope(False, "Số lượng thêm phải lớn hơn 0.")
+                ops.append((0, 0, {"product_id": pid, "product_qty": float(qty)}))
+            elif action == "set_qty":
+                if pid not in by_pid:
+                    return envelope(False, f"Nguyên liệu ID {pid} chưa có trong "
+                                           f"BoM. Nguyên liệu hiện có: "
+                                           f"{sorted(by_pid)}.")
+                if (qty or 0) <= 0:
+                    return envelope(False, "Số lượng phải lớn hơn 0.")
+                ops.append((1, by_pid[pid]["id"], {"product_qty": float(qty)}))
+            elif action == "remove":
+                if pid not in by_pid:
+                    return envelope(False, f"Nguyên liệu ID {pid} chưa có trong "
+                                           f"BoM. Nguyên liệu hiện có: "
+                                           f"{sorted(by_pid)}.")
+                ops.append((2, by_pid[pid]["id"], 0))
+                remaining.discard(pid)
+            else:
+                return envelope(False, f"Thao tác '{action}' không hợp lệ.")
+        if not remaining and not any(o[0] == 0 for o in ops):
+            return envelope(False, "BoM phải còn ít nhất 1 nguyên liệu.")
+        odoo("mrp.bom", "write", [[bom_id], {"bom_line_ids": ops}])
+        after = odoo("mrp.bom.line", "search_read", [[["bom_id", "=", bom_id]]],
+                     {"fields": ["id"], "limit": 100})
+        return envelope(True, f"Đã cập nhật BoM {label}: {len(after)} nguyên liệu.",
+                        ref=label, model="mrp.bom", res_id=bom_id, state="active")
+    except Exception as e:  # noqa: BLE001
+        return envelope(False, f"Lỗi khi sửa BoM: {e}")
+
+
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
