@@ -242,3 +242,36 @@ def test_list_late_deliveries_capped_false_excludes_caveat():
     display = out["display"]
     # Caveat text should NOT appear when capped=False
     assert "(có thể còn nhiều hơn — đã đạt giới hạn 100 dòng)" not in display
+
+
+def test_find_done_deliveries_order_not_found():
+    gw = Gateway(MultiModelTransport({"sale.order": []}))
+    out = inventory.find_done_deliveries_for_order("S99999", gw=gw)
+    assert out["status"] == "error"
+
+
+def test_find_done_deliveries_no_pickings_at_all():
+    gw = Gateway(MultiModelTransport({
+        "sale.order": [{"id": 115, "name": "S00115", "state": "sale",
+                        "picking_ids": []}],
+    }))
+    out = inventory.find_done_deliveries_for_order("S00115", gw=gw)
+    assert out["status"] == "success"
+    assert out["data"]["pickings"] == []
+
+
+def test_find_done_deliveries_filters_outgoing_done_only():
+    gw = Gateway(MultiModelTransport({
+        "sale.order": [{"id": 115, "name": "S00115", "state": "sale",
+                        "picking_ids": [147, 156]}],
+        "stock.picking": [{"id": 147, "name": "WH/OUT/00092",
+                           "date_done": "2026-07-18 07:09:42"}],
+    }))
+    out = inventory.find_done_deliveries_for_order("S00115", gw=gw)
+    assert out["status"] == "success"
+    pickings = out["data"]["pickings"]
+    assert len(pickings) == 1 and pickings[0]["name"] == "WH/OUT/00092"
+    call = next(c for c in gw._t.calls if c[0] == "stock.picking")
+    domain = call[2][0]
+    assert ["picking_type_id.code", "=", "outgoing"] in domain
+    assert ["state", "=", "done"] in domain

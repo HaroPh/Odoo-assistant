@@ -101,3 +101,26 @@ def test_get_partner_balance_no_debt():
     gw = Gateway(PartnerBalanceTransport(partners, [], []))
     out = accounting.get_partner_balance("Clean Co", gw=gw)
     assert "không còn công nợ" in out["display"]
+
+
+def test_find_posted_invoice_not_found():
+    gw = _gw([])
+    out = accounting.find_posted_invoice("INV/2026/99999", gw=gw)
+    assert out["status"] == "error"
+    assert "Không tìm thấy" in out["display"]
+
+
+def test_find_posted_invoice_not_yet_posted():
+    gw = _gw([{"id": 68, "name": "INV/2026/00017", "state": "draft",
+               "partner_id": [15, "Azure Interior"], "amount_total": 70.0}])
+    out = accounting.find_posted_invoice("INV/2026/00017", gw=gw)
+    assert out["status"] == "error"
+    assert "chưa phát hành" in out["display"]
+
+
+def test_find_posted_invoice_happy():
+    gw = _gw([{"id": 68, "name": "INV/2026/00017", "state": "posted",
+               "partner_id": [15, "Azure Interior"], "amount_total": 70.0}])
+    out = accounting.find_posted_invoice("INV/2026/00017", gw=gw)
+    assert out["status"] == "success"
+    assert out["data"]["invoice"]["id"] == 68

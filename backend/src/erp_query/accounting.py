@@ -92,3 +92,31 @@ def get_partner_balance(name, *, gw=None):
         parts.append(f"  Mình nợ NCC (phải trả): {ap_amt:,.0f}")
     return ok({"partner": partner, "receivable": ar_amt, "payable": ap_amt},
               "\n".join(parts))
+
+
+def find_posted_invoice(invoice_ref, *, gw=None):
+    """NỘI BỘ (coordinator create_credit_memo) — resolve 1 hóa đơn khách
+    theo SỐ CHÍNH XÁC, lọc move_type='out_invoice' + state='posted'. Phân
+    biệt rõ 'không tồn tại' vs 'chưa phát hành' để báo lỗi đúng nguyên
+    nhân."""
+    gw = gw or default_gateway()
+    try:
+        rows = gw.search_read("account.move",
+                              [["name", "=", invoice_ref],
+                               ["move_type", "=", "out_invoice"]],
+                              ["id", "name", "state", "partner_id",
+                               "amount_total"], limit=2)
+    except Exception as e:                                  # noqa: BLE001
+        return err(f"Lỗi tra cứu hóa đơn: {e}")
+    if not rows:
+        return err(f"Không tìm thấy hóa đơn khách '{invoice_ref}'.")
+    if len(rows) > 1:
+        return err(f"Có nhiều hóa đơn tên '{invoice_ref}'.")
+    inv = rows[0]
+    if inv["state"] != "posted":
+        return err(f"Hóa đơn {inv['name']} chưa phát hành "
+                   f"(trạng thái: {inv['state']}).")
+    return ok({"invoice": inv},
+              f"Hóa đơn {inv['name']} | "
+              f"{(inv['partner_id'] or [0, 'N/A'])[1]} | "
+              f"{inv['amount_total']:,.0f}.")

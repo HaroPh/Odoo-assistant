@@ -138,3 +138,34 @@ def list_late_deliveries(direction=None, *, gw=None):
     if count > 15:
         display_text += f"\n...và {count - 15} phiếu khác."
     return ok({"rows": display_rows, "count": count, "capped": capped}, display_text)
+
+
+def find_done_deliveries_for_order(order_ref, *, gw=None):
+    """NỘI BỘ (coordinator return_order) — tìm đơn bán + các phiếu giao
+    (outgoing) ĐÃ DONE của đơn đó (ứng viên để trả hàng)."""
+    gw = gw or default_gateway()
+    try:
+        orders = gw.search_read("sale.order", [["name", "=", order_ref]],
+                                ["id", "name", "state", "picking_ids"], limit=2)
+    except Exception as e:                                  # noqa: BLE001
+        return err(f"Lỗi tra cứu đơn bán: {e}")
+    if not orders:
+        return err(f"Không tìm thấy đơn '{order_ref}'.")
+    if len(orders) > 1:
+        return err(f"Có nhiều đơn tên '{order_ref}'.")
+    order = orders[0]
+    pick_ids = order.get("picking_ids") or []
+    if not pick_ids:
+        return ok({"order": order, "pickings": []},
+                  f"Đơn {order['name']} chưa có phiếu giao nào.")
+    try:
+        pickings = gw.search_read("stock.picking",
+                                  [["id", "in", pick_ids],
+                                   ["picking_type_id.code", "=", "outgoing"],
+                                   ["state", "=", "done"]],
+                                  ["id", "name", "date_done"],
+                                  order="date_done desc", limit=20)
+    except Exception as e:                                  # noqa: BLE001
+        return err(f"Lỗi tra cứu phiếu giao: {e}")
+    return ok({"order": order, "pickings": pickings},
+              f"{len(pickings)} phiếu giao đã hoàn tất cho đơn {order['name']}.")
