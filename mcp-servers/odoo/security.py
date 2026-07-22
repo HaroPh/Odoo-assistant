@@ -43,3 +43,24 @@ def sanitize_model(name: str) -> str:
     if not name or not re.match(r"^[a-zA-Z0-9._]+$", name):
         raise ValueError(f"Tên model không hợp lệ: {name!r}")
     return name.strip()
+
+
+_FIELD_KEY_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
+
+def sanitize_payload_keys(value, *, _depth: int = 0, _max_depth: int = 10) -> None:
+    """Đệ quy quét mọi dict trong args/kwargs của odoo(), validate KEY-SHAPE
+    (Odoo field name luôn snake_case identifier). VALUE không bị đụng — có
+    thể là bất kỳ cấu trúc nào (list, command-tuple, nested dict) tùy
+    model/field. Raise ValueError ở key đầu tiên sai hình dạng. Side-effect-
+    free — chỉ kiểm tra, không sửa value tại chỗ. An toàn gọi trên cả args
+    (list) lẫn kwargs (dict)."""
+    if _depth > _max_depth:
+        raise ValueError("Payload lồng quá sâu — nghi ngờ dữ liệu bất thường")
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if not (isinstance(k, str) and _FIELD_KEY_RE.match(k)):
+                raise ValueError(f"Tên field không hợp lệ trong payload: {k!r}")
+            sanitize_payload_keys(v, _depth=_depth + 1, _max_depth=_max_depth)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            sanitize_payload_keys(item, _depth=_depth + 1, _max_depth=_max_depth)
