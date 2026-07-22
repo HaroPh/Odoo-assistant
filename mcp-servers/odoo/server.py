@@ -780,6 +780,42 @@ def flag_order_for_review(model: str, order_ref: str, note: str) -> str:
         return envelope(False, f"Lỗi khi ghi chú đơn {order_ref}: {e}")
 
 
+def _resolve_location(name: str | None):
+    """Resolve a location name → unique {'id','complete_name'} row. Empty
+    name → the default warehouse's main stock location. Returns (loc, None)
+    on success, (None, error_message) otherwise."""
+    if not name:
+        wh = odoo("stock.warehouse", "search_read", [[]],
+                  {"fields": ["lot_stock_id"], "limit": 1})
+        if not wh:
+            return None, "Không tìm thấy kho mặc định."
+        return {"id": wh[0]["lot_stock_id"][0],
+                "complete_name": wh[0]["lot_stock_id"][1]}, None
+    # Odoo builds stock.location.complete_name from the warehouse's short
+    # CODE ("WH/Stock"), not its human display name — so a user naming
+    # their warehouse by its real name never matches on complete_name
+    # alone. Also search stock.warehouse.name and fold in its internal
+    # stock location as a candidate.
+    wh_rows = odoo("stock.warehouse", "search_read",
+                   [[["name", "ilike", name]]],
+                   {"fields": ["id", "name", "lot_stock_id"], "limit": 6})
+    lrows = odoo("stock.location", "search_read",
+                 [[["usage", "=", "internal"],
+                   ["complete_name", "ilike", name]]],
+                 {"fields": ["id", "complete_name"], "limit": 6})
+    candidates = {}
+    for w in wh_rows:
+        if w.get("lot_stock_id"):
+            lid, lname = w["lot_stock_id"]
+            candidates[lid] = {"id": lid, "complete_name": lname}
+    for r in lrows:
+        candidates.setdefault(r["id"], {"id": r["id"], "complete_name": r["complete_name"]})
+    return resolve_unique(
+        list(candidates.values()), "vị trí kho",
+        describe=lambda r: r["complete_name"],
+        hint="Vui lòng nêu rõ tên vị trí kho.")
+
+
 @mcp.tool()
 def inventory_adjustment(new_qty: float, product_name: str = "",
                          location_name: str | None = None, product_id: int = 0) -> str:
@@ -806,39 +842,9 @@ def inventory_adjustment(new_qty: float, product_name: str = "",
         if msg:
             return msg
 
-    if location_name:
-        # Odoo builds stock.location.complete_name from the warehouse's
-        # short CODE ("WH/Stock"), not its human display name — so a user
-        # naming their warehouse by its real name never matches on
-        # complete_name alone. Also search stock.warehouse.name and fold in
-        # its internal stock location as a candidate.
-        wh_rows = odoo("stock.warehouse", "search_read",
-                       [[["name", "ilike", location_name]]],
-                       {"fields": ["id", "name", "lot_stock_id"], "limit": 6})
-        lrows = odoo("stock.location", "search_read",
-                     [[["usage", "=", "internal"],
-                       ["complete_name", "ilike", location_name]]],
-                     {"fields": ["id", "complete_name"], "limit": 6})
-        candidates = {}
-        for w in wh_rows:
-            if w.get("lot_stock_id"):
-                lid, lname = w["lot_stock_id"]
-                candidates[lid] = {"id": lid, "complete_name": lname}
-        for r in lrows:
-            candidates.setdefault(r["id"], {"id": r["id"], "complete_name": r["complete_name"]})
-        loc, lmsg = resolve_unique(
-            list(candidates.values()), "vị trí kho",
-            describe=lambda r: r["complete_name"],
-            hint="Vui lòng nêu rõ tên vị trí kho.")
-        if lmsg:
-            return lmsg
-    else:
-        wh = odoo("stock.warehouse", "search_read", [[]],
-                  {"fields": ["lot_stock_id"], "limit": 1})
-        if not wh:
-            return "Không tìm thấy kho mặc định."
-        loc = {"id": wh[0]["lot_stock_id"][0],
-               "complete_name": wh[0]["lot_stock_id"][1]}
+    loc, lmsg = _resolve_location(location_name)
+    if lmsg:
+        return lmsg
 
     quants = odoo("stock.quant", "search_read",
                   [[["product_id", "=", prod["id"]],
@@ -1420,6 +1426,75 @@ def update_bom_lines(bom_id: int, changes: list) -> str:
                         ref=label, model="mrp.bom", res_id=bom_id, state="active")
     except Exception as e:  # noqa: BLE001
         return envelope(False, f"Lỗi khi sửa BoM: {e}")
+
+
+@mcp.tool()
+def internal_transfer(product_name: str = "", qty: float = 0.0,
+                      from_location: str = "", to_location: str = "",
+                      product_id: int = 0) -> str:
+    """Chuyển tồn kho một sản phẩm giữa 2 vị trí nội bộ trong cùng kho (vd
+    Shelf 1 → Shelf 2). Cả from_location và to_location đều BẮT BUỘC.
+    YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        product_name: Tên sản phẩm lưu kho (tìm gần đúng).
+        qty: Số lượng cần chuyển (> 0).
+        from_location: Tên vị trí nguồn.
+        to_location: Tên vị trí đích.
+    """
+    if qty <= 0:
+        return "Số lượng cần chuyển không hợp lệ (phải lớn hơn 0)."
+    if not from_location or not to_location:
+        return "Cần nêu rõ cả vị trí nguồn và vị trí đích."
+
+    if product_id:
+        prows = odoo("product.product", "read", [[product_id]], {"fields": ["id", "name"]})
+        if not prows:
+            return f"Không tìm thấy sản phẩm ID {product_id}."
+        prod = prows[0]
+    else:
+        prod, msg = _resolve_product(product_name, "is_storable")
+        if msg:
+            return msg
+
+    src, msg = _resolve_location(from_location)
+    if msg:
+        return msg
+    dst, msg = _resolve_location(to_location)
+    if msg:
+        return msg
+    if src["id"] == dst["id"]:
+        return "Vị trí nguồn và đích không được trùng nhau."
+
+    wh = odoo("stock.warehouse", "search_read", [[]],
+             {"fields": ["int_type_id"], "limit": 1})
+    if not wh or not wh[0].get("int_type_id"):
+        return "Không tìm thấy loại phiếu chuyển kho nội bộ."
+    picking_type_id = wh[0]["int_type_id"][0]
+
+    picking_id = odoo("stock.picking", "create", [{
+        "picking_type_id": picking_type_id,
+        "location_id": src["id"],
+        "location_dest_id": dst["id"],
+        "move_ids": [(0, 0, {"product_id": prod["id"], "product_uom_qty": qty})],
+    }])
+    odoo("stock.picking", "action_confirm", [[picking_id]])
+    odoo("stock.picking", "action_assign", [[picking_id]])
+    rows = odoo("stock.picking", "read", [[picking_id]], {"fields": ["name", "state"]})
+    pick = rows[0]
+    if pick["state"] != "assigned":
+        return (f"Phiếu {pick['name']} chưa sẵn sàng (trạng thái: {pick['state']}). "
+                f"Có thể không đủ tồn kho tại {src['complete_name']}.")
+
+    # Odoo 19: an 'assigned' picking already has done-qty = reserved on every
+    # move, so button_validate completes directly (no immediate-transfer
+    # wizard) — same behavior validate_picking already relies on.
+    result = odoo("stock.picking", "button_validate", [[picking_id]])
+    if isinstance(result, dict):
+        return (f"Phiếu {pick['name']} cần thao tác bổ sung trên Odoo "
+                f"(wizard không hỗ trợ qua API). Vui lòng xử lý trực tiếp.")
+    return (f"Đã chuyển {qty:g} {prod['name']} từ {src['complete_name']} "
+            f"sang {dst['complete_name']} (phiếu {pick['name']}).")
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
