@@ -38,7 +38,7 @@ Available write tools — use the tool name and arg keys EXACTLY as written:
 - confirm_purchase_order(order_ref: str)      # order_ref = mã đơn mua, vd "P00003"
 - post_invoice(partner_name: str, amount: float = null, invoice_date: str = null)  # phát hành hóa đơn nháp của khách; amount/invoice_date để chọn khi có nhiều nháp
 - create_invoice_from_order(order_ref: str)   # tạo hóa đơn nháp từ đơn bán ĐÃ XÁC NHẬN, vd "S00012"
-- validate_picking(picking_ref: str)          # picking_ref = mã phiếu, vd "WH/OUT/00001"
+- validate_picking(picking_ref: str)          # xác nhận PHIẾU KHO (giao/xuất, nhận/nhập, hoặc trả hàng) đã reserve đủ hàng — ĐÂY KHÔNG PHẢI xác nhận đơn mua/đơn bán (đó là confirm_purchase_order/confirm_sale_order); picking_ref = mã phiếu kho, vd "WH/OUT/00001" (xuất) hoặc "WH/IN/00005" (nhập/nhận/trả hàng)
 - deliver_order(order_ref: str)  # giao hàng cho đơn bán ĐÃ XÁC NHẬN (xác nhận các phiếu xuất đã reserve đủ), vd "S00012"
 - receive_order(order_ref: str)  # nhận hàng cho đơn mua ĐÃ XÁC NHẬN (xác nhận các phiếu nhập), vd "P00003"
 - create_bill_from_po(order_ref: str)  # tạo hóa đơn nhà cung cấp (nháp) từ đơn mua ĐÃ NHẬN HÀNG, vd "P00003"
