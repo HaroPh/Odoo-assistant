@@ -11,6 +11,7 @@ from .inventory_write import make_inventory_node, make_internal_transfer_node, m
 from .crm_write import make_create_lead_node, make_convert_lead_node, make_log_activity_node
 from .mrp_write import make_create_mo_node
 from .bom_write import make_create_bom_node, make_update_bom_node
+from .returns_write import make_return_order_node, make_create_credit_memo_node
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,8 @@ WRITE_COORDINATORS = {
     "create_manufacturing_order": Spec("create_mo", lambda llm, tools: make_create_mo_node(tools)),
     "create_bom":       Spec("create_bom", lambda llm, tools: make_create_bom_node(tools)),
     "update_bom_lines": Spec("update_bom", lambda llm, tools: make_update_bom_node(tools)),
+    "return_order":       Spec("return_order",       lambda llm, tools: make_return_order_node(tools)),
+    "create_credit_memo": Spec("create_credit_memo", lambda llm, tools: make_create_credit_memo_node(tools)),
 }
 
 COORDINATED_TOOLS = frozenset(WRITE_COORDINATORS)
@@ -83,6 +86,11 @@ NEXT_STEPS = {
     "confirm_manufacturing_order": NextStep("Hoàn tất sản xuất",
                                             "complete_manufacturing_order",
                                             lambda lw: {"order_ref": lw["ref"]}),
+    # ── chuỗi trả hàng / hoàn tiền ──
+    "return_order":       NextStep("Xác nhận phiếu trả hàng", "validate_picking",
+                                   lambda lw: {"picking_ref": lw["ref"]}),
+    "create_credit_memo": NextStep("Phát hành hóa đơn", "post_invoice",
+                                   lambda lw: {"invoice_id": lw["res_id"]}),
 }
 
 

@@ -50,6 +50,7 @@ def test_next_steps_chain_is_linear_and_terminal():
         "update_quotation_lines", "update_rfq_lines",
         "create_lead",
         "create_manufacturing_order", "confirm_manufacturing_order",
+        "return_order", "create_credit_memo",
     }
     lw = {"tool": "x", "ok": True, "ref": "S00031", "model": "sale.order",
           "res_id": 42, "state": "draft", "display": "x"}
@@ -117,3 +118,15 @@ def test_next_steps_chain_is_linear_and_terminal():
     assert NEXT_STEPS["confirm_manufacturing_order"].args(mlw) \
         == {"order_ref": "WH/MO/00007"}
     assert "complete_manufacturing_order" not in NEXT_STEPS   # terminal
+    # ── returns / credit memo chain ──
+    rlw = {**lw, "ref": "WH/IN/00057", "model": "stock.picking", "res_id": 156}
+    assert (NEXT_STEPS["return_order"].tool, NEXT_STEPS["return_order"].label) \
+        == ("validate_picking", "Xác nhận phiếu trả hàng")
+    assert NEXT_STEPS["return_order"].args(rlw) == {"picking_ref": "WH/IN/00057"}
+    assert "validate_picking" not in NEXT_STEPS   # terminal — không chain tiếp
+    clw = {**lw, "ref": None, "model": "account.move", "res_id": 72}
+    assert (NEXT_STEPS["create_credit_memo"].tool,
+            NEXT_STEPS["create_credit_memo"].label) \
+        == ("post_invoice", "Phát hành hóa đơn")
+    assert NEXT_STEPS["create_credit_memo"].args(clw) == {"invoice_id": 72}
+    # create_credit_memo re-enters the shared post_invoice → register_payment tail

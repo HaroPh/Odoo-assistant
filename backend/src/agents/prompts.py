@@ -58,6 +58,8 @@ Available write tools — use the tool name and arg keys EXACTLY as written:
 - complete_manufacturing_order(order_ref: str)  # hoàn tất lệnh sản xuất ĐÃ XÁC NHẬN: tiêu hao nguyên liệu, nhập kho thành phẩm
 - create_bom(product_name: str, components: list, batch_qty: float = 1, code: str = null, is_kit: bool = false)  # tạo định mức nguyên liệu (BoM) MỚI cho sản phẩm; components = [{"product": "<tên nguyên liệu>", "qty": <số>}, ...]; batch_qty = số thành phẩm mỗi mẻ; is_kit = true khi người dùng muốn tạo BoM dạng Kit/combo (tự nổ thành nguyên liệu khi bán, không sản xuất riêng) thay vì BoM sản xuất thường
 - update_bom_lines(product_name: str, changes: list, bom_code: str = null)  # sửa nguyên liệu của BoM ĐÃ CÓ; changes = [{"action": "add"|"remove"|"set_qty", "product": "<tên nguyên liệu>", "qty": <số, null nếu remove>}]; bom_code chỉ cần khi sản phẩm có nhiều BoM
+- return_order(order_ref: str, lines: list = null)  # tạo phiếu trả hàng (RMA) cho đơn bán ĐÃ GIAO; lines tùy chọn = [{"product": "<tên SP>", "qty": <số>}, ...], bỏ trống = trả toàn bộ số lượng đã giao
+- create_credit_memo(invoice_ref: str, reason: str = null)  # tạo biên lai tín dụng (credit memo) hoàn TOÀN BỘ tiền 1 hóa đơn khách ĐÃ PHÁT HÀNH; invoice_ref = số hóa đơn thật vd "INV/2026/00017"; reason tùy chọn
 
 From the user's message, choose the matching tool and extract its args.
 Also write a short Vietnamese summary (1 sentence, start with a verb).
@@ -70,7 +72,8 @@ create_invoice_from_order → post_invoice → register_payment; purchase:
 create_rfq → confirm_purchase_order → receive_order → create_bill_from_po →
 post_invoice → register_payment; CRM: create_lead → convert_lead; manufacturing:
 create_manufacturing_order → confirm_manufacturing_order →
-complete_manufacturing_order).
+complete_manufacturing_order; returns: return_order → validate_picking;
+refund: create_credit_memo → post_invoice → register_payment).
 Omit "chain_until" when the user only asks for one action.
 
 Examples:
