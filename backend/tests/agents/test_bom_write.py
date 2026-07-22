@@ -190,6 +190,15 @@ def _mo_count(monkeypatch, count, capped=False):
         "display": "x"})
 
 
+def _kit_count(monkeypatch, count, capped=False):
+    monkeypatch.setattr(bw.mrp, "count_pending_sale_orders_for_kit", lambda *a, **k: {
+        "status": "success", "data": {"count": count, "capped": capped},
+        "display": "x"})
+
+
+_KIT_BOM = {"id": 6, "code": None, "type": "phantom", "product_qty": 1.0}
+
+
 @pytest.mark.asyncio
 async def test_update_bom_slot_ask(monkeypatch):
     monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
@@ -353,3 +362,119 @@ def test_bom_registered_in_registry_and_prompts():
     assert "update_bom_lines" not in NEXT_STEPS
     assert "create_bom(product_name" in WRITE_PLANNER_PROMPT
     assert "update_bom_lines(product_name" in WRITE_PLANNER_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_create_bom_is_kit_draft_header(monkeypatch):
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
+    _boms(monkeypatch, [])
+    monkeypatch.setattr(bw.inventory, "find_product",
+                        lambda ref, *a, **k: (_ok_resolve(_LAMP, False)
+                                              if "lamp" in ref.lower()
+                                              else _ok_resolve([{"id": 67, "name": "Comp", "score": 1}], False)))
+    rec = {}
+    graph = _graph(bw.make_create_bom_node([_fake_tool("create_bom", rec)]))
+    cfg = {"configurable": {"thread_id": "cbk1"}}
+    res = await graph.ainvoke(_state("create_bom", {
+        "product_name": "Office Lamp", "is_kit": True,
+        "components": [{"product": "Comp", "qty": 2}]}), cfg)
+    itr = res["__interrupt__"][0].value
+    assert "Tạo BoM Kit cho" in itr["question"] and "Office Lamp" in itr["question"]
+    res = await graph.ainvoke(Command(resume=True), cfg)
+    assert rec["args"]["is_kit"] is True
+
+
+@pytest.mark.asyncio
+async def test_create_bom_normal_draft_header_unchanged(monkeypatch):
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
+    _boms(monkeypatch, [])
+    monkeypatch.setattr(bw.inventory, "find_product",
+                        lambda ref, *a, **k: (_ok_resolve(_LAMP, False)
+                                              if "lamp" in ref.lower()
+                                              else _ok_resolve([{"id": 67, "name": "Comp", "score": 1}], False)))
+    rec = {}
+    graph = _graph(bw.make_create_bom_node([_fake_tool("create_bom", rec)]))
+    cfg = {"configurable": {"thread_id": "cbk2"}}
+    res = await graph.ainvoke(_state("create_bom", {
+        "product_name": "Office Lamp",
+        "components": [{"product": "Comp", "qty": 2}]}), cfg)
+    itr = res["__interrupt__"][0].value
+    assert "Tạo BoM mới cho" in itr["question"] and "Office Lamp" in itr["question"]
+    res = await graph.ainvoke(Command(resume=True), cfg)
+    assert rec["args"]["is_kit"] is False
+
+
+@pytest.mark.asyncio
+async def test_update_bom_kit_warns_with_sale_order_count(monkeypatch):
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
+    _boms(monkeypatch, [_KIT_BOM])
+    _recipe_kit = {"status": "success",
+                   "data": {"bom": _KIT_BOM,
+                            "lines": [{"product_id": 67, "name": "Drawer Black", "qty": 2.0}]},
+                   "display": "x"}
+    monkeypatch.setattr(bw.mrp, "get_bom_recipe", lambda *a, **k: _recipe_kit)
+    _kit_count(monkeypatch, 3)
+    monkeypatch.setattr(bw.inventory, "find_product",
+                        lambda ref, *a, **k: (_ok_resolve(_LAMP, False)
+                                              if "lamp" in ref.lower()
+                                              else _ok_resolve([{"id": 67, "name": "Drawer Black", "score": 1}], False)))
+    rec = {}
+    graph = _graph(bw.make_update_bom_node([_fake_tool("update_bom_lines", rec)]))
+    cfg = {"configurable": {"thread_id": "ubk1"}}
+    res = await graph.ainvoke(_state("update_bom_lines", {
+        "product_name": "Office Lamp",
+        "changes": [{"action": "set_qty", "product": "Drawer Black", "qty": 5}]}), cfg)
+    itr = res["__interrupt__"][0].value
+    assert "⚠" in itr["question"]
+    assert "đơn bán" in itr["question"]
+    assert "3 đơn bán" in itr["question"]
+    assert "lệnh sản xuất" not in itr["question"] and "lệnh đang mở" not in itr["question"]
+
+
+@pytest.mark.asyncio
+async def test_select_bom_picks_single_phantom_without_disambiguation(monkeypatch):
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
+    _boms(monkeypatch, [_KIT_BOM])
+    monkeypatch.setattr(bw.mrp, "get_bom_recipe", lambda *a, **k: {
+        "status": "success",
+        "data": {"bom": _KIT_BOM, "lines": []}, "display": "x"})
+    _kit_count(monkeypatch, 0)
+    monkeypatch.setattr(bw.inventory, "find_product",
+                        lambda ref, *a, **k: (_ok_resolve(_LAMP, False)
+                                              if "lamp" in ref.lower()
+                                              else _ok_resolve([{"id": 67, "name": "Comp", "score": 1}], False)))
+    rec = {}
+    graph = _graph(bw.make_update_bom_node([_fake_tool("update_bom_lines", rec)]))
+    cfg = {"configurable": {"thread_id": "ubk2"}}
+    res = await graph.ainvoke(_state("update_bom_lines", {
+        "product_name": "Office Lamp",
+        "changes": [{"action": "add", "product": "Comp", "qty": 1}]}), cfg)
+    itr = res["__interrupt__"][0].value
+    assert itr["kind"] == "confirm"          # duy nhất -> không disambiguation
+    res = await graph.ainvoke(Command(resume=True), cfg)
+    assert rec["args"]["bom_id"] == 6
+
+
+@pytest.mark.asyncio
+async def test_select_bom_disambiguation_labels_kit(monkeypatch):
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
+    _boms(monkeypatch, [_PRIM, _KIT_BOM])
+    monkeypatch.setattr(bw.mrp, "get_bom_recipe", lambda *a, **k: {
+        "status": "success",
+        "data": {"bom": _PRIM, "lines": [{"product_id": 67, "name": "Drawer Black", "qty": 2.0}]},
+        "display": "x"})
+    _mo_count(monkeypatch, 0)
+    monkeypatch.setattr(bw.inventory, "find_product",
+                        lambda ref, *a, **k: (_ok_resolve(_LAMP, False)
+                                              if "lamp" in ref.lower()
+                                              else _ok_resolve([{"id": 67, "name": "Drawer Black", "score": 1}], False)))
+    graph = _graph(bw.make_update_bom_node([_fake_tool("update_bom_lines", {})]))
+    cfg = {"configurable": {"thread_id": "ubk3"}}
+    res = await graph.ainvoke(_state("update_bom_lines", {
+        "product_name": "Office Lamp",
+        "changes": [{"action": "set_qty", "product": "Drawer Black", "qty": 5}]}), cfg)
+    itr = res["__interrupt__"][0].value
+    assert itr["kind"] == "disambiguation"
+    names = [o["name"] for o in itr["options"]]
+    assert any("(Kit)" in n for n in names)
+    assert any("(Kit)" not in n for n in names)

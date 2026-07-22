@@ -25,7 +25,10 @@ def _finish(tool_name: str, result) -> dict:
 
 
 def _bom_label(b: dict) -> str:
-    return b.get("code") or f"BoM #{b['id']}"
+    label = b.get("code") or f"BoM #{b['id']}"
+    if b.get("type") == "phantom":
+        label += " (Kit)"
+    return label
 
 
 def _resolve_one(ref: str):
@@ -48,9 +51,9 @@ def _resolve_one(ref: str):
 
 
 def _select_bom(product_ref: str, bom_code: str):
-    """Resolve sản phẩm → chọn BoM normal (code / duy nhất / disambig). Lặp
-    logic mrp_write.make_create_mo_node có chủ đích (spec §8.3). →
-    ('ok', bom_dict) | ('msg', <dict>)."""
+    """Resolve sản phẩm → chọn BoM (normal HOẶC Kit) — code / duy nhất /
+    disambig. Lặp logic mrp_write.make_create_mo_node có chủ đích (spec
+    §8.3). → ('ok', bom_dict) | ('msg', <dict>)."""
     kind, product = _resolve_one(product_ref)
     if kind == "msg":
         return "msg", product
@@ -58,27 +61,27 @@ def _select_bom(product_ref: str, bom_code: str):
     if benv.get("status") != "success":
         return "msg", _msg(benv.get("display") or "Lỗi tra cứu định mức.")
     boms = (benv.get("data") or {}).get("boms") or []
-    normal = [b for b in boms if b.get("type") == "normal"]
-    if not normal:
+    editable = [b for b in boms if b.get("type") in ("normal", "phantom")]
+    if not editable:
         return "msg", _msg(f"Sản phẩm '{product['name']}' chưa có BoM (định mức) "
                            f"nào để sửa.")
     if bom_code:
-        match = [b for b in normal
+        match = [b for b in editable
                  if (b.get("code") or "").casefold() == bom_code.casefold()]
         if not match:
-            codes = ", ".join(_bom_label(b) for b in normal)
+            codes = ", ".join(_bom_label(b) for b in editable)
             return "msg", _msg(f"Không có BoM mã '{bom_code}' cho sản phẩm này. "
                                f"BoM hiện có: {codes}.")
         return "ok", match[0]
-    if len(normal) == 1:
-        return "ok", normal[0]
+    if len(editable) == 1:
+        return "ok", editable[0]
     options = [{"id": b["id"],
                 "name": f"{_bom_label(b)} (cho {b['product_qty']:g} đơn vị)"}
-               for b in normal]
+               for b in editable]
     chosen = _interrupt({"kind": "disambiguation",
                          "question": _disambig_q("định mức (BoM)", options),
                          "options": options, "expires_at": _ttl_expiry()})
-    bom = next((b for b in normal if b["id"] == chosen), None)
+    bom = next((b for b in editable if b["id"] == chosen), None)
     if bom is None:
         return "msg", _msg("Đã hủy.")
     return "ok", bom
@@ -93,6 +96,7 @@ def make_create_bom_node(tools):
         args = (state.get("pending_action") or {}).get("args") or {}
         product_ref = str(args.get("product_name") or "").strip()
         raw_components = args.get("components") or []
+        is_kit = bool(args.get("is_kit"))
         try:
             batch_qty = float(args.get("batch_qty") or 1)
         except (TypeError, ValueError):
@@ -140,7 +144,8 @@ def make_create_bom_node(tools):
                         f"bản mới sẽ là BoM bổ sung.")
 
         code = str(args.get("code") or "").strip()
-        head = f"Tạo BoM mới cho {product['name']}"
+        head = f"Tạo BoM Kit cho {product['name']}" if is_kit \
+            else f"Tạo BoM mới cho {product['name']}"
         if code:
             head += f" (mã {code})"
         draft = (f"{head}:\nMẻ: {batch_qty:g} đơn vị thành phẩm\n"
@@ -156,7 +161,8 @@ def make_create_bom_node(tools):
         try:
             result = await tool.ainvoke({"product_id": product["id"],
                                          "components": components,
-                                         "batch_qty": batch_qty, "code": code})
+                                         "batch_qty": batch_qty, "code": code,
+                                         "is_kit": is_kit})
         except Exception as e:  # noqa: BLE001
             return _msg(f"Lỗi khi tạo BoM: {e}")
         return _finish("create_bom", result)
@@ -241,14 +247,20 @@ def make_update_bom_node(tools):
         if not after:
             return _msg("BoM phải còn ít nhất 1 nguyên liệu.")
 
-        cnt_env = mrp.open_mo_count_for_bom(bom["id"])
-        warn = "\n⚠ Định mức mới chỉ áp dụng cho lệnh sản xuất tạo TỪ SAU thời điểm này"
+        if bom.get("type") == "phantom":
+            cnt_env = mrp.count_pending_sale_orders_for_kit(bom["id"])
+            warn = "\n⚠ Định mức mới chỉ áp dụng cho đơn bán xác nhận TỪ SAU thời điểm này"
+            unit_label = "đơn bán đang chờ giao"
+        else:
+            cnt_env = mrp.open_mo_count_for_bom(bom["id"])
+            warn = "\n⚠ Định mức mới chỉ áp dụng cho lệnh sản xuất tạo TỪ SAU thời điểm này"
+            unit_label = "lệnh đang mở"
         if cnt_env.get("status") == "success":
             n = (cnt_env.get("data") or {}).get("count", 0)
             capped = (cnt_env.get("data") or {}).get("capped", False)
             if n > 0:
-                warn += (f" — {'100+' if capped else n} lệnh đang mở của BoM "
-                         f"này giữ nguyên định mức cũ")
+                warn += (f" — {'100+' if capped else n} {unit_label} "
+                         f"của BoM này giữ nguyên định mức cũ")
         warn += "."
 
         cur_txt = "\n".join(f"  - {l['name']} × {l['qty']:g}" for l in cur)
