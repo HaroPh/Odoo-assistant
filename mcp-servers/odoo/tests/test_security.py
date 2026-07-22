@@ -52,3 +52,7 @@ def test_classify_convert_opportunity_method():
 
 def test_classify_scrap_validate_method():
     assert security.classify_operation("action_validate") == "write"
+
+
+def test_classify_return_order_method():
+    assert security.classify_operation("action_create_returns") == "write"

@@ -28,6 +28,7 @@ ODOO_METHOD_OPERATION_MAP = {
     "convert_opportunity": "write",
     "button_mark_done": "write",
     "action_assign": "write",
+    "action_create_returns": "write",
     # UNLINK — Phase 3: cần confirmation + cảnh báo
     "unlink": "unlink", "action_delete": "unlink",
 }

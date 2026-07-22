@@ -1543,6 +1543,76 @@ def scrap_product(product_name: str = "", qty: float = 0.0,
     return f"Đã ghi nhận phế liệu {qty:g} {prod['name']} tại {loc['complete_name']}."
 
 
+@mcp.tool()
+def return_order(picking_id: int, lines: list | None = None) -> str:
+    """Tạo phiếu trả hàng (RMA) từ một phiếu giao (stock.picking) ĐÃ DONE.
+    Nhận ID ĐÃ resolve (coordinator lo resolve đơn bán → phiếu giao, và
+    tên sản phẩm → ID). lines tùy chọn: [{"product_id": <id>, "qty":
+    <số>}, ...] — bỏ trống/rỗng = trả TOÀN BỘ số lượng đã giao trong
+    phiếu. YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        picking_id: ID phiếu giao (stock.picking) đã DONE cần trả hàng.
+        lines: Danh sách sản phẩm+số lượng cần trả (tùy chọn; bỏ trống =
+            trả toàn bộ).
+    """
+    try:
+        lines = lines or []
+        prows = odoo("stock.picking", "search_read",
+                     [[["id", "=", picking_id]]],
+                     {"fields": ["id", "name", "state"], "limit": 1})
+        if not prows:
+            return envelope(False, f"Không tìm thấy phiếu giao ID {picking_id}.")
+        picking = prows[0]
+        if picking["state"] != "done":
+            return envelope(False, f"Phiếu {picking['name']} chưa hoàn tất, "
+                                   f"không thể tạo phiếu trả hàng.")
+
+        wiz_id = odoo("stock.return.picking", "create",
+                      [{"picking_id": picking_id}])
+        wiz = odoo("stock.return.picking", "read", [[wiz_id]],
+                   {"fields": ["product_return_moves"]})[0]
+        return_line_ids = wiz["product_return_moves"]
+        return_lines = odoo("stock.return.picking.line", "read",
+                            [return_line_ids],
+                            {"fields": ["product_id", "move_quantity"]})
+        by_pid = {rl["product_id"][0]: rl for rl in return_lines}
+
+        if lines:
+            for l in lines:
+                pid = l.get("product_id")
+                qty = l.get("qty") or 0
+                if pid not in by_pid:
+                    names = ", ".join(rl["product_id"][1] for rl in return_lines)
+                    return envelope(False, f"Sản phẩm ID {pid} không có trong "
+                                           f"phiếu {picking['name']}. Sản phẩm "
+                                           f"đã giao: {names}.")
+                if qty <= 0:
+                    return envelope(False, "Số lượng trả phải lớn hơn 0.")
+                odoo("stock.return.picking.line", "write",
+                     [[by_pid[pid]["id"]], {"quantity": float(qty)}])
+        else:
+            for rl in return_lines:
+                odoo("stock.return.picking.line", "write",
+                     [[rl["id"]], {"quantity": rl["move_quantity"]}])
+
+        action = odoo("stock.return.picking", "action_create_returns", [[wiz_id]])
+        new_id = action.get("res_id") if isinstance(action, dict) else None
+        if not new_id:
+            return envelope(False, f"Không tạo được phiếu trả hàng cho "
+                                   f"{picking['name']} — vui lòng kiểm tra "
+                                   f"trên Odoo.")
+        new_pick = odoo("stock.picking", "read", [[new_id]],
+                        {"fields": ["name", "state"]})[0]
+        return envelope(True,
+                        f"Đã tạo phiếu trả hàng {new_pick['name']} từ "
+                        f"{picking['name']}.",
+                        ref=new_pick["name"], model="stock.picking",
+                        res_id=new_id, state=new_pick["state"])
+    except Exception as e:  # noqa: BLE001
+        return envelope(False, f"Lỗi khi tạo phiếu trả hàng: {e}")
+
+
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

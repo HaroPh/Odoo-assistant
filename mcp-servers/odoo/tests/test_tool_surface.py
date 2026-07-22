@@ -12,7 +12,7 @@ KEPT = ["create_quotation", "create_rfq", "confirm_sale_order",
         "confirm_purchase_order", "post_invoice", "validate_picking",
         "inventory_adjustment", "create_invoice_from_order", "deliver_order",
         "receive_order", "create_bill_from_po", "internal_transfer",
-        "scrap_product"]
+        "scrap_product", "return_order"]
 
 
 def test_read_tools_removed_do_tools_present(monkeypatch):
