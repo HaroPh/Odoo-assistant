@@ -104,3 +104,172 @@ async def test_gate(monkeypatch):
     cfg = {"configurable": {"thread_id": "i4"}}
     res = await graph.ainvoke(_state({"product_name": "Tủ", "new_qty": 3}), cfg)
     assert "chưa được kích hoạt" in res["messages"][-1].content
+
+
+def _fake_transfer_tool(recorder):
+    t = MagicMock()
+    t.name = "internal_transfer"
+
+    async def ainvoke(args):
+        recorder["args"] = args
+        return "Đã chuyển 5 Tủ từ WH/Tồn kho/Shelf 1 sang WH/Tồn kho/Shelf 2 (phiếu WH/INT/00001)."
+
+    t.ainvoke = ainvoke
+    return t
+
+
+def _fake_scrap_tool(recorder):
+    t = MagicMock()
+    t.name = "scrap_product"
+
+    async def ainvoke(args):
+        recorder["args"] = args
+        return "Đã ghi nhận phế liệu 2 Tủ tại WH/Tồn kho."
+
+    t.ainvoke = ainvoke
+    return t
+
+
+def _transfer_state(args):
+    return {"messages": [], "intent": "erp_write", "confirmed": None,
+            "pending_action": {"tool": "internal_transfer", "args": args,
+                               "summary": "Chuyển kho nội bộ"}}
+
+
+def _scrap_state(args):
+    return {"messages": [], "intent": "erp_write", "confirmed": None,
+            "pending_action": {"tool": "scrap_product", "args": args,
+                               "summary": "Ghi nhận phế liệu"}}
+
+
+@pytest.mark.asyncio
+async def test_transfer_happy_path(monkeypatch):
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
+    monkeypatch.setattr(iw.inventory, "find_product",
+                        lambda *a, **k: _ok([{"id": 552, "name": "Tủ", "score": 1}], False))
+    rec = {}
+    graph = _graph(iw.make_internal_transfer_node([_fake_transfer_tool(rec)]))
+    cfg = {"configurable": {"thread_id": "t1"}}
+    res = await graph.ainvoke(_transfer_state({"product_name": "Tủ", "qty": 5,
+                                               "from_location": "Shelf 1",
+                                               "to_location": "Shelf 2"}), cfg)
+    itr = res["__interrupt__"][0].value
+    assert itr["kind"] == "confirm"
+    assert "Tủ" in itr["question"] and "Shelf 1" in itr["question"] and "Shelf 2" in itr["question"]
+    res = await graph.ainvoke(Command(resume=True), cfg)
+    assert rec["args"] == {"product_id": 552, "qty": 5, "from_location": "Shelf 1",
+                           "to_location": "Shelf 2"}
+
+
+@pytest.mark.asyncio
+async def test_transfer_missing_locations_asks_instead_of_resolving(monkeypatch):
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
+    rec = {}
+    graph = _graph(iw.make_internal_transfer_node([_fake_transfer_tool(rec)]))
+    cfg = {"configurable": {"thread_id": "t2"}}
+    res = await graph.ainvoke(_transfer_state({"product_name": "Tủ", "qty": 5,
+                                               "from_location": "", "to_location": ""}), cfg)
+    assert "nguồn" in res["messages"][-1].content.lower()
+    assert rec == {}
+
+
+@pytest.mark.asyncio
+async def test_transfer_ambiguous_product(monkeypatch):
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
+    monkeypatch.setattr(iw.inventory, "find_product", lambda *a, **k: _ok(
+        [{"id": 552, "name": "Tủ lớn", "score": .6},
+         {"id": 553, "name": "Tủ nhỏ", "score": .6}], True))
+    rec = {}
+    graph = _graph(iw.make_internal_transfer_node([_fake_transfer_tool(rec)]))
+    cfg = {"configurable": {"thread_id": "t3"}}
+    res = await graph.ainvoke(_transfer_state({"product_name": "Tủ", "qty": 2,
+                                               "from_location": "Shelf 1",
+                                               "to_location": "Shelf 2"}), cfg)
+    assert res["__interrupt__"][0].value["kind"] == "disambiguation"
+    res = await graph.ainvoke(Command(resume=553), cfg)
+    assert res["__interrupt__"][0].value["kind"] == "confirm"
+    res = await graph.ainvoke(Command(resume=True), cfg)
+    assert rec["args"]["product_id"] == 553
+
+
+@pytest.mark.asyncio
+async def test_transfer_cancel(monkeypatch):
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
+    monkeypatch.setattr(iw.inventory, "find_product",
+                        lambda *a, **k: _ok([{"id": 552, "name": "Tủ", "score": 1}], False))
+    rec = {}
+    graph = _graph(iw.make_internal_transfer_node([_fake_transfer_tool(rec)]))
+    cfg = {"configurable": {"thread_id": "t4"}}
+    await graph.ainvoke(_transfer_state({"product_name": "Tủ", "qty": 5,
+                                         "from_location": "Shelf 1", "to_location": "Shelf 2"}), cfg)
+    res = await graph.ainvoke(Command(resume=False), cfg)
+    assert "hủy" in res["messages"][-1].content.lower()
+    assert rec == {}
+
+
+@pytest.mark.asyncio
+async def test_transfer_gate(monkeypatch):
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: False)
+    graph = _graph(iw.make_internal_transfer_node([_fake_transfer_tool({})]))
+    cfg = {"configurable": {"thread_id": "t5"}}
+    res = await graph.ainvoke(_transfer_state({"product_name": "Tủ", "qty": 5,
+                                               "from_location": "Shelf 1", "to_location": "Shelf 2"}), cfg)
+    assert "chưa được kích hoạt" in res["messages"][-1].content
+
+
+@pytest.mark.asyncio
+async def test_scrap_happy_path(monkeypatch):
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
+    monkeypatch.setattr(iw.inventory, "find_product",
+                        lambda *a, **k: _ok([{"id": 552, "name": "Tủ", "score": 1}], False))
+    rec = {}
+    graph = _graph(iw.make_scrap_product_node([_fake_scrap_tool(rec)]))
+    cfg = {"configurable": {"thread_id": "s1"}}
+    res = await graph.ainvoke(_scrap_state({"product_name": "Tủ", "qty": 2,
+                                            "reason": "hàng vỡ"}), cfg)
+    itr = res["__interrupt__"][0].value
+    assert itr["kind"] == "confirm"
+    assert "Tủ" in itr["question"] and "2" in itr["question"]
+    res = await graph.ainvoke(Command(resume=True), cfg)
+    assert rec["args"] == {"product_id": 552, "qty": 2, "location_name": None,
+                           "reason": "hàng vỡ"}
+
+
+@pytest.mark.asyncio
+async def test_scrap_ambiguous_product(monkeypatch):
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
+    monkeypatch.setattr(iw.inventory, "find_product", lambda *a, **k: _ok(
+        [{"id": 552, "name": "Tủ lớn", "score": .6},
+         {"id": 553, "name": "Tủ nhỏ", "score": .6}], True))
+    rec = {}
+    graph = _graph(iw.make_scrap_product_node([_fake_scrap_tool(rec)]))
+    cfg = {"configurable": {"thread_id": "s2"}}
+    res = await graph.ainvoke(_scrap_state({"product_name": "Tủ", "qty": 1}), cfg)
+    assert res["__interrupt__"][0].value["kind"] == "disambiguation"
+    res = await graph.ainvoke(Command(resume=553), cfg)
+    assert res["__interrupt__"][0].value["kind"] == "confirm"
+    res = await graph.ainvoke(Command(resume=True), cfg)
+    assert rec["args"]["product_id"] == 553
+
+
+@pytest.mark.asyncio
+async def test_scrap_cancel(monkeypatch):
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: True)
+    monkeypatch.setattr(iw.inventory, "find_product",
+                        lambda *a, **k: _ok([{"id": 552, "name": "Tủ", "score": 1}], False))
+    rec = {}
+    graph = _graph(iw.make_scrap_product_node([_fake_scrap_tool(rec)]))
+    cfg = {"configurable": {"thread_id": "s3"}}
+    await graph.ainvoke(_scrap_state({"product_name": "Tủ", "qty": 1}), cfg)
+    res = await graph.ainvoke(Command(resume=False), cfg)
+    assert "hủy" in res["messages"][-1].content.lower()
+    assert rec == {}
+
+
+@pytest.mark.asyncio
+async def test_scrap_gate(monkeypatch):
+    monkeypatch.setattr(write_gate, "write_actions_enabled", lambda: False)
+    graph = _graph(iw.make_scrap_product_node([_fake_scrap_tool({})]))
+    cfg = {"configurable": {"thread_id": "s4"}}
+    res = await graph.ainvoke(_scrap_state({"product_name": "Tủ", "qty": 1}), cfg)
+    assert "chưa được kích hoạt" in res["messages"][-1].content

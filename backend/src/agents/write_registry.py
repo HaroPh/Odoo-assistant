@@ -7,7 +7,7 @@ from typing import Callable
 
 from .create_order import make_order_node, SALE_CFG, PURCHASE_CFG
 from .edit_order import make_edit_order_node, SALE_EDIT_CFG, PURCHASE_EDIT_CFG
-from .inventory_write import make_inventory_node
+from .inventory_write import make_inventory_node, make_internal_transfer_node, make_scrap_product_node
 from .crm_write import make_create_lead_node, make_convert_lead_node, make_log_activity_node
 from .mrp_write import make_create_mo_node
 from .bom_write import make_create_bom_node, make_update_bom_node
@@ -25,6 +25,8 @@ WRITE_COORDINATORS = {
     "update_quotation_lines": Spec("edit_order", lambda llm, tools: make_edit_order_node(tools, SALE_EDIT_CFG)),
     "update_rfq_lines":       Spec("edit_rfq",   lambda llm, tools: make_edit_order_node(tools, PURCHASE_EDIT_CFG)),
     "inventory_adjustment": Spec("inventory_adjust", lambda llm, tools: make_inventory_node(tools)),
+    "internal_transfer": Spec("internal_transfer", lambda llm, tools: make_internal_transfer_node(tools)),
+    "scrap_product":     Spec("scrap_product",     lambda llm, tools: make_scrap_product_node(tools)),
     "create_lead":  Spec("crm_create_lead",  lambda llm, tools: make_create_lead_node(tools)),
     "convert_lead": Spec("crm_convert_lead", lambda llm, tools: make_convert_lead_node(tools)),
     "log_activity": Spec("crm_log_activity", lambda llm, tools: make_log_activity_node(tools)),
