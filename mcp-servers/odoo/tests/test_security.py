@@ -121,3 +121,8 @@ def test_sanitize_payload_keys_depth_cap():
         nested = {"a": [nested]}
     with pytest.raises(ValueError):
         security.sanitize_payload_keys(nested)
+
+
+def test_sanitize_payload_keys_rejects_trailing_newline_key():
+    with pytest.raises(ValueError):
+        security.sanitize_payload_keys({"partner_id\n": 5})

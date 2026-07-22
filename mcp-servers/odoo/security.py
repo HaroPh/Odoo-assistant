@@ -58,7 +58,7 @@ def sanitize_payload_keys(value, *, _depth: int = 0, _max_depth: int = 10) -> No
         raise ValueError("Payload lồng quá sâu — nghi ngờ dữ liệu bất thường")
     if isinstance(value, dict):
         for k, v in value.items():
-            if not (isinstance(k, str) and _FIELD_KEY_RE.match(k)):
+            if not (isinstance(k, str) and _FIELD_KEY_RE.fullmatch(k)):
                 raise ValueError(f"Tên field không hợp lệ trong payload: {k!r}")
             sanitize_payload_keys(v, _depth=_depth + 1, _max_depth=_max_depth)
     elif isinstance(value, (list, tuple)):
