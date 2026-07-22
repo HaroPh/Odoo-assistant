@@ -1,11 +1,16 @@
 # backend/src/agents/bom_write.py
 """Deterministic BoM coordinators (tier-1): create_bom + update_bom_lines.
+Hỗ trợ cả BoM normal (mrp.bom.type='normal') và Kit (type='phantom').
 Slot-filling qua _msg (KHÔNG interrupt); resolve sản phẩm + từng component/
 change; create hiện recipe đầy đủ, update hiện DIFF hiện-tại→sau + cảnh báo
-blast-radius tất định (probe 2026-07-21: MO đang mở đóng băng recipe cũ, chỉ
-MO tạo sau ăn recipe mới). BoM là master data — KHÔNG NEXT_STEPS chain. Chọn
-BoM lặp logic mrp_write.py có chủ đích (tránh đụng file round 4 đã merge —
-xem spec §8.3). Không LLM. Xem docs/superpowers/specs/2026-07-21-bom-management-design.md."""
+blast-radius tất định — rẽ nhánh theo bom['type']: normal dùng
+open_mo_count_for_bom (probe 2026-07-21: MO đang mở đóng băng recipe cũ, chỉ
+MO tạo sau ăn recipe mới); phantom/Kit dùng count_pending_sale_orders_for_kit
+(probe 2026-07-22: Kit đóng băng recipe tại thời điểm XÁC NHẬN ĐƠN BÁN, không
+phải lúc giao hàng). BoM là master data — KHÔNG NEXT_STEPS chain. Chọn BoM
+lặp logic mrp_write.py có chủ đích (tránh đụng file round 4 đã merge — xem
+spec §8.3). Không LLM. Xem docs/superpowers/specs/2026-07-21-bom-management-design.md
+và docs/superpowers/specs/2026-07-22-kit-combo-bom-design.md."""
 from langgraph.types import interrupt as _interrupt
 
 from .state import ERPAgentState
