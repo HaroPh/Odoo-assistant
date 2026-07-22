@@ -17,6 +17,12 @@ INTENT_CASES = [
     ("khách Azure Interior có bao nhiêu đơn chưa thanh toán?", "erp_read"),
     ("hóa đơn nào đang quá hạn?", "erp_read"),
     ("còn lô nào của Large Cabinet trong kho không?", "erp_read"),
+    ("định mức nguyên liệu của Drawer gồm những gì?", "erp_read"),
+    ("sản phẩm nào đang cần đặt hàng lại?", "erp_read"),
+    ("đơn mua nào có số lượng nhận và hóa đơn không khớp nhau?", "erp_read"),
+    ("phiếu giao hàng nào đang trễ hạn?", "erp_read"),
+    ("công nợ hiện tại của khách Azure Interior là bao nhiêu?", "erp_read"),
+    ("danh sách cơ hội đang mở gần đây", "erp_read"),
     # erp_write
     ("tạo báo giá cho Azure Interior, 2 Large Cabinet", "erp_write"),
     ("xác nhận đơn S00042", "erp_write"),
@@ -26,6 +32,13 @@ INTENT_CASES = [
     ("xuất hóa đơn cho đơn S00039", "erp_write"),
     ("điều chỉnh tồn kho Desk Pad về 100", "erp_write"),
     ("làm ơn tạo báo giá mới nhất cho khách Gemini Furniture, số lượng 3 bàn", "erp_write"),  # từng misroute
+    ("tạo lead mới cho khách Green Valley, quan tâm sản phẩm bàn ghế văn phòng", "erp_write"),
+    ("tạo lệnh sản xuất 20 Drawer", "erp_write"),
+    ("cập nhật định mức nguyên liệu của Drawer, thêm 2 ốc vít", "erp_write"),
+    ("chuyển 10 Desk Pad từ kho chính sang kho phụ", "erp_write"),
+    ("loại bỏ 3 Desk Pad bị hỏng khỏi kho", "erp_write"),
+    ("khách Azure Interior trả lại 1 Large Cabinet đã giao", "erp_write"),
+    ("ghi nhận thanh toán cho hóa đơn INV/2026/00016", "erp_write"),
     # rag
     ("chính sách đổi trả hàng như thế nào?", "rag"),
     ("SLA giao hàng nội thành là bao lâu?", "rag"),
@@ -44,6 +57,7 @@ INTENT_CASES = [
     ("đơn nào đang vi phạm SLA giao hàng?", "mixed"),
     ("giá trong đơn S00039 có khớp bảng giá hiện hành không?", "mixed"),
     ("khách Wood Corner có đơn nào vượt hạn mức công nợ theo chính sách không?", "mixed"),
+    ("lệnh sản xuất mới có cần kiểm tra chất lượng theo SOP trước khi hoàn tất không?", "mixed"),
     # unknown
     ("chào bạn", "unknown"),
     ("cảm ơn nhé", "unknown"),
