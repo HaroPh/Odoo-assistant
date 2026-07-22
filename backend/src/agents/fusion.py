@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 WRITE_TOOL_NAMES = frozenset({
     "confirm_sale_order", "confirm_purchase_order", "post_invoice",
     "validate_picking", "create_quotation", "create_rfq",
-    "inventory_adjustment",
+    "inventory_adjustment", "internal_transfer", "scrap_product",
 })
 
 

@@ -91,3 +91,14 @@ def test_planner_prompt_advertises_crm_tools():
 
 def test_planner_prompt_mentions_crm_chain():
     assert "create_lead → convert_lead" in WRITE_PLANNER_PROMPT
+
+
+def test_planner_prompt_advertises_internal_transfer():
+    assert "internal_transfer" in WRITE_PLANNER_PROMPT
+    assert "from_location" in WRITE_PLANNER_PROMPT
+    assert "to_location" in WRITE_PLANNER_PROMPT
+
+
+def test_planner_prompt_advertises_scrap_product():
+    assert "scrap_product" in WRITE_PLANNER_PROMPT
+    assert "scrap_product(product_name" in WRITE_PLANNER_PROMPT

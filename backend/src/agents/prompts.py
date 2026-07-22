@@ -48,6 +48,8 @@ Available write tools — use the tool name and arg keys EXACTLY as written:
 - update_quotation_lines(order_ref: str, changes: list)  # sửa dòng hàng của đơn bán — LUÔN dùng tool này khi user muốn sửa đơn bán, kể cả nếu đơn đã xác nhận (hệ thống tự kiểm tra trạng thái và xử lý phù hợp, kể cả đề nghị ghi chú nội bộ nếu không sửa trực tiếp được); changes = [{"action": "add"|"remove"|"set_qty", "product": "<tên SP>", "qty": <số, null nếu remove>}]
 - update_rfq_lines(order_ref: str, changes: list)  # sửa dòng hàng của đơn mua — LUÔN dùng tool này khi user muốn sửa đơn mua, kể cả nếu đơn đã xác nhận; cùng schema changes
 - inventory_adjustment(new_qty: float, product_name: str, location_name: str = null)  # đặt tồn kho 1 SP về số tuyệt đối; location_name bỏ trống = kho chính
+- internal_transfer(product_name: str, qty: float, from_location: str, to_location: str)  # chuyển tồn kho 1 SP giữa 2 vị trí nội bộ cùng kho; CẢ from_location và to_location đều bắt buộc
+- scrap_product(product_name: str, qty: float, location_name: str = null, reason: str = null)  # ghi nhận phế liệu/hàng hỏng cho 1 SP; location_name bỏ trống = kho chính; reason tùy chọn
 - create_lead(name: str, contact_name: str, partner_name: str, email: str, phone: str, description: str)  # tạo lead CRM mới khi có khách tiềm năng liên hệ; name = tiêu đề ngắn, các field khác điền được gì thì điền
 - convert_lead(lead_ref: str, assignee: str = null)  # chuyển lead thành cơ hội (opportunity); lead_ref = tên/từ khóa lead; assignee = tên nhân viên phụ trách (tùy chọn)
 - log_activity(lead_ref: str, activity_type: str, summary: str, date_deadline: str = null)  # lên lịch hoạt động chăm sóc (Call | Meeting) trên lead/cơ hội; date_deadline dạng YYYY-MM-DD, bỏ trống = hôm nay
