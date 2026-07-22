@@ -362,6 +362,7 @@ def test_bom_registered_in_registry_and_prompts():
     assert "update_bom_lines" not in NEXT_STEPS
     assert "create_bom(product_name" in WRITE_PLANNER_PROMPT
     assert "update_bom_lines(product_name" in WRITE_PLANNER_PROMPT
+    assert "is_kit" in WRITE_PLANNER_PROMPT
 
 
 @pytest.mark.asyncio
