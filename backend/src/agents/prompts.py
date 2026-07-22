@@ -73,7 +73,8 @@ create_rfq → confirm_purchase_order → receive_order → create_bill_from_po 
 post_invoice → register_payment; CRM: create_lead → convert_lead; manufacturing:
 create_manufacturing_order → confirm_manufacturing_order →
 complete_manufacturing_order; returns: return_order → validate_picking;
-refund: create_credit_memo → post_invoice → register_payment).
+refund: create_credit_memo → post_invoice — KHÔNG có bước register_payment
+tiếp theo, credit memo tự động đối soát với hóa đơn gốc ngay khi phát hành).
 Omit "chain_until" when the user only asks for one action.
 
 Examples:
