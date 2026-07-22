@@ -1365,7 +1365,7 @@ def create_bom(product_id: int, components: list, batch_qty: float = 1.0,
 
 @mcp.tool()
 def update_bom_lines(bom_id: int, changes: list) -> str:
-    """Sửa danh sách nguyên liệu của một BoM ĐÃ CÓ (type 'normal'). Mỗi change:
+    """Sửa danh sách nguyên liệu của một BoM ĐÃ CÓ (normal hoặc Kit). Mỗi change:
     {"action": "add"|"remove"|"set_qty", "product_id": <id>, "qty": <số|None>}.
     Validate toàn bộ trước khi ghi (all-or-nothing). YÊU CẦU XÁC NHẬN trước.
 
