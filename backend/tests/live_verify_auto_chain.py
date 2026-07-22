@@ -57,7 +57,7 @@ def test_scenario_1():
     print("SCENARIO 1: Chain ngắn (short chain)")
     print("="*70)
 
-    user_msg = "tạo báo giá cho Azure Interior, 2 Large Cabinet rồi xác nhận luôn"
+    user_msg = "tạo báo giá cho Azure Interior, 2 [E-COM07] Large Cabinet rồi xác nhận luôn"
     thread_id = make_unique_thread_id("s1")
 
     print(f"\n[Turn 1] User: {user_msg}")
@@ -110,7 +110,7 @@ def test_scenario_2():
     print("="*70)
 
     # First, create a draft order for testing (using a product we know exists)
-    create_msg = "tạo báo giá cho Azure Interior, 1 Large Cabinet"
+    create_msg = "tạo báo giá cho Azure Interior, 1 [E-COM07] Large Cabinet"
     print(f"\n[Setup] Creating draft order: {create_msg}")
 
     thread_setup = make_unique_thread_id("s2-setup")
@@ -176,7 +176,7 @@ def test_scenario_3():
     print("="*70)
 
     # Use a product we know exists, WITHOUT chain declaration (no "rồi xác nhận")
-    user_msg = "tạo báo giá cho Azure Interior, 1 Large Cabinet"
+    user_msg = "tạo báo giá cho Azure Interior, 1 [E-COM07] Large Cabinet"
     thread_id = make_unique_thread_id("s3")
 
     print(f"\n[Turn 1] User: {user_msg}")
