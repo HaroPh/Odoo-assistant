@@ -21,6 +21,7 @@ ODOO_METHOD_OPERATION_MAP = {
     "button_confirm": "write",
     "action_post": "write",
     "button_validate": "write",
+    "action_validate": "write",
     "action_apply_inventory": "write",
     "action_register_payment": "write",
     "action_create_payments": "write",

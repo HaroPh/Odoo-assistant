@@ -1497,6 +1497,49 @@ def internal_transfer(product_name: str = "", qty: float = 0.0,
             f"sang {dst['complete_name']} (phiếu {pick['name']}).")
 
 
+@mcp.tool()
+def scrap_product(product_name: str = "", qty: float = 0.0,
+                  location_name: str | None = None, reason: str | None = None,
+                  product_id: int = 0) -> str:
+    """Ghi nhận phế liệu/hàng hỏng cho một sản phẩm — trừ khỏi tồn kho khả
+    dụng, chuyển vào vị trí phế liệu ảo của công ty. Nếu không nêu vị trí
+    thì dùng kho chính. YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
+
+    Args:
+        product_name: Tên sản phẩm lưu kho (tìm gần đúng).
+        qty: Số lượng phế liệu (> 0).
+        location_name: Tên vị trí nguồn (tùy chọn; bỏ trống = kho chính).
+        reason: Lý do phế liệu (tùy chọn, ghi vào Source Document).
+    """
+    if qty <= 0:
+        return "Số lượng phế liệu không hợp lệ (phải lớn hơn 0)."
+
+    if product_id:
+        prows = odoo("product.product", "read", [[product_id]], {"fields": ["id", "name"]})
+        if not prows:
+            return f"Không tìm thấy sản phẩm ID {product_id}."
+        prod = prows[0]
+    else:
+        prod, msg = _resolve_product(product_name, "is_storable")
+        if msg:
+            return msg
+
+    loc, msg = _resolve_location(location_name)
+    if msg:
+        return msg
+
+    vals = {"product_id": prod["id"], "scrap_qty": qty, "location_id": loc["id"]}
+    if reason:
+        vals["origin"] = reason
+    scrap_id = odoo("stock.scrap", "create", [vals])
+
+    result = odoo("stock.scrap", "action_validate", [[scrap_id]])
+    if isinstance(result, dict):
+        return (f"Không đủ tồn kho {prod['name']} tại {loc['complete_name']} để "
+                f"ghi nhận phế liệu. Vui lòng xử lý trực tiếp trên Odoo.")
+    return f"Đã ghi nhận phế liệu {qty:g} {prod['name']} tại {loc['complete_name']}."
+
+
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

@@ -48,3 +48,7 @@ def test_classify_register_payment_methods():
 
 def test_classify_convert_opportunity_method():
     assert security.classify_operation("convert_opportunity") == "write"
+
+
+def test_classify_scrap_validate_method():
+    assert security.classify_operation("action_validate") == "write"
