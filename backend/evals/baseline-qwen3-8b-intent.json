@@ -1,8 +1,18 @@
 {
   "set": "intent",
-  "n": 40,
-  "acc": 0.9,
+  "n": 54,
+  "acc": 0.8703703703703703,
   "fails": [
+    {
+      "text": "khách Azure Interior trả lại 1 Large Cabinet đã giao",
+      "expected": "erp_write",
+      "got": "rag"
+    },
+    {
+      "text": "đơn S00042 có được miễn phí giao không theo chính sách?",
+      "expected": "mixed",
+      "got": "rag"
+    },
     {
       "text": "đơn của Azure Interior trễ SLA chưa?",
       "expected": "mixed",
@@ -22,6 +32,12 @@
       "text": "giá trong đơn S00039 có khớp bảng giá hiện hành không?",
       "expected": "mixed",
       "got": "erp_read"
+    },
+    {
+      "text": "lệnh sản xuất mới có cần kiểm tra chất lượng theo SOP trước khi hoàn tất không?",
+      "expected": "mixed",
+      "got": "rag"
     }
-  ]
+  ],
+  "errors": []
 }
