@@ -11,7 +11,8 @@ import xmlrpc.client
 from mcp.server.fastmcp import FastMCP
 
 from config import ODOO_URL, ODOO_DB, ODOO_USER, ODOO_PWD
-from security import ODOO_METHOD_OPERATION_MAP, classify_operation, sanitize_model
+from security import (ODOO_METHOD_OPERATION_MAP, classify_operation,
+                      sanitize_model, sanitize_payload_keys)
 from rate_limit import check_rate_limit
 from event_log import log_mcp_event
 from helpers import now_iso, today_iso, resolve_unique, envelope
@@ -43,6 +44,8 @@ def odoo(model: str, method: str, args: list, kwargs: dict | None = None,
     if tool_name is None:
         tool_name = sys._getframe(1).f_code.co_name   # tên tool đang gọi
     model = sanitize_model(model)
+    sanitize_payload_keys(args)
+    sanitize_payload_keys(kwargs or {})
 
     op = classify_operation(method)
     if op is None:
