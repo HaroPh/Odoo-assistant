@@ -123,6 +123,31 @@ def test_create_bom_omits_code_when_empty(monkeypatch):
     assert out["ref"] == "BoM #9"              # label fallback
 
 
+def test_create_bom_is_kit_sets_phantom_type(monkeypatch):
+    calls = _fake(monkeypatch, {
+        ("product.product", "search_read"): _LAMP,
+        ("mrp.bom", "create"): 9,
+        ("mrp.bom", "search_read"): [_bom(code="AI-KIT", type="phantom")],
+    })
+    out = _env(fn("create_bom")(39, [{"product_id": COMP_A, "qty": 2}],
+                                is_kit=True))
+    assert out["ok"] is True
+    create = next(c for c in calls if c["method"] == "create")
+    assert create["args"][0]["type"] == "phantom"
+
+
+def test_create_bom_normal_omits_type_key(monkeypatch):
+    calls = _fake(monkeypatch, {
+        ("product.product", "search_read"): _LAMP,
+        ("mrp.bom", "create"): 9,
+        ("mrp.bom", "search_read"): [_bom(code="AI-BOM")],
+    })
+    out = _env(fn("create_bom")(39, [{"product_id": COMP_A, "qty": 2}]))
+    assert out["ok"] is True
+    create = next(c for c in calls if c["method"] == "create")
+    assert "type" not in create["args"][0]     # is_kit=False default -> unchanged behavior
+
+
 # ── update_bom_lines ─────────────────────────────────────────────────────────
 
 def test_update_bom_empty_changes(monkeypatch):
@@ -138,10 +163,16 @@ def test_update_bom_not_found(monkeypatch):
     assert out["ok"] is False and "Không tìm thấy BoM" in out["display"]
 
 
-def test_update_bom_phantom_rejected(monkeypatch):
-    _fake(monkeypatch, {("mrp.bom", "search_read"): [_bom(type="phantom")]})
-    out = _env(fn("update_bom_lines")(9, [{"action": "add", "product_id": COMP_A, "qty": 1}]))
-    assert out["ok"] is False and "Kit" in out["display"]
+def test_update_bom_phantom_no_longer_rejected(monkeypatch):
+    # Round 6 (Tier 4): update_bom_lines now supports Kit BoMs too — the
+    # old hard rejection here was round 5's deliberate scope cut, not a
+    # permanent restriction.
+    _fake(monkeypatch, {
+        ("mrp.bom", "search_read"): [_bom(type="phantom")],
+        ("mrp.bom.line", "search_read"): [_line(18, COMP_A, 2.0, "Drawer Black")],
+    })
+    out = _env(fn("update_bom_lines")(9, [{"action": "set_qty", "product_id": COMP_A, "qty": 5}]))
+    assert out["ok"] is True
 
 
 def test_update_bom_add_existing_component(monkeypatch):

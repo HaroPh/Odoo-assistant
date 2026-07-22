@@ -1310,16 +1310,19 @@ def complete_manufacturing_order(order_ref: str) -> str:
 
 @mcp.tool()
 def create_bom(product_id: int, components: list, batch_qty: float = 1.0,
-               code: str = "") -> str:
-    """Tạo định mức nguyên liệu (mrp.bom, type 'normal') MỚI cho một sản phẩm.
-    Nhận ID ĐÃ resolve (coordinator lo resolve tên). YÊU CẦU XÁC NHẬN từ người
-    dùng trước khi gọi.
+               code: str = "", is_kit: bool = False) -> str:
+    """Tạo định mức nguyên liệu (mrp.bom) MỚI cho một sản phẩm — 'normal'
+    (sản xuất trực tiếp) hoặc 'phantom'/Kit (tự nổ thành nguyên liệu khi
+    bán, không sản xuất riêng) tùy is_kit. Nhận ID ĐÃ resolve (coordinator
+    lo resolve tên). YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
 
     Args:
         product_id: ID sản phẩm thành phẩm (product.product).
         components: [{"product_id": <id nguyên liệu>, "qty": <số>}, ...].
         batch_qty: Số thành phẩm mỗi mẻ (mặc định 1).
         code: Mã tham chiếu BoM (tùy chọn).
+        is_kit: True = tạo BoM Kit (type 'phantom'); False = BoM thường
+            (type 'normal', mặc định).
     """
     try:
         components = components or []
@@ -1346,6 +1349,8 @@ def create_bom(product_id: int, components: list, batch_qty: float = 1.0,
                                  for c in components]}
         if code:
             vals["code"] = code
+        if is_kit:
+            vals["type"] = "phantom"
         bom_id = odoo("mrp.bom", "create", [vals])
         bom = odoo("mrp.bom", "search_read", [[["id", "=", bom_id]]],
                    {"fields": ["id", "code"], "limit": 1})[0]
@@ -1377,8 +1382,6 @@ def update_bom_lines(bom_id: int, changes: list) -> str:
         if not brows or not brows[0]["active"]:
             return envelope(False, f"Không tìm thấy BoM {bom_id}.")
         bom = brows[0]
-        if bom["type"] != "normal":
-            return envelope(False, "BoM này là Kit — ngoài phạm vi sửa.")
         label = bom.get("code") or f"BoM #{bom_id}"
         lines = odoo("mrp.bom.line", "search_read", [[["bom_id", "=", bom_id]]],
                      {"fields": ["id", "product_id", "product_qty"], "limit": 100})
