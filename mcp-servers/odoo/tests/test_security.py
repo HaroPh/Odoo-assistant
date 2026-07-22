@@ -56,3 +56,7 @@ def test_classify_scrap_validate_method():
 
 def test_classify_return_order_method():
     assert security.classify_operation("action_create_returns") == "write"
+
+
+def test_classify_credit_memo_method():
+    assert security.classify_operation("refund_moves") == "write"

@@ -96,7 +96,8 @@ def test_post_invoice_filters_draft_and_partner(monkeypatch):
     domain = calls[0]["args"][0]
     assert ["state", "=", "draft"] in domain
     assert ["partner_id.name", "ilike", "Azure Interior"] in domain
-    assert ["move_type", "in", ["out_invoice", "in_invoice"]] in domain
+    assert ["move_type", "in", ["out_invoice", "in_invoice",
+                                "out_refund", "in_refund"]] in domain
 
 
 def test_post_invoice_multiple_drafts_lists_candidates(monkeypatch):
@@ -604,7 +605,8 @@ def test_post_invoice_by_id_posts_draft(monkeypatch):
     assert data["state"] == "posted"
     assert ("account.move", "action_post", [[61]]) in cap
     assert ["id", "=", 61] in calls[0]["args"][0]      # id-filtered domain
-    assert ["move_type", "in", ["out_invoice", "in_invoice"]] in calls[0]["args"][0]
+    assert ["move_type", "in", ["out_invoice", "in_invoice",
+                                "out_refund", "in_refund"]] in calls[0]["args"][0]
 
 
 def test_post_invoice_by_id_already_posted(monkeypatch):
@@ -623,6 +625,31 @@ def test_post_invoice_by_id_not_found(monkeypatch):
     data = _env(fn("post_invoice")(invoice_id=999))
     assert data["ok"] is False
     assert "không tìm thấy" in data["display"].lower()
+
+
+def test_post_invoice_by_id_accepts_credit_note(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch, {
+        ("account.move", "search_read"): [
+            {"id": 72, "name": False, "state": "draft", "partner_id": [15, "Azure"]}],
+        ("account.move", "read"): [{"name": "RINV/2026/00005", "partner_id": [15, "Azure"]}],
+    }, confirm_capture=cap)
+    data = _env(fn("post_invoice")(invoice_id=72))
+    assert data["ok"] is True and data["ref"] == "RINV/2026/00005"
+    assert ("account.move", "action_post", [[72]]) in cap
+
+
+def test_post_invoice_name_path_accepts_credit_note(monkeypatch):
+    cap = []
+    patch_odoo(monkeypatch, {
+        ("account.move", "search_read"): [
+            {"id": 72, "partner_id": [15, "Azure Interior"], "amount_total": 70.0,
+             "invoice_date": "2026-07-22", "move_type": "out_refund"}],
+        ("account.move", "read"): [{"name": "RINV/2026/00005"}],
+    }, confirm_capture=cap)
+    out = fn("post_invoice")("Azure Interior")
+    assert "đã phát hành" in out.lower() and "RINV/2026/00005" in out
+    assert ("account.move", "action_post", [[72]]) in cap
 
 
 def test_post_invoice_no_args_asks(monkeypatch):

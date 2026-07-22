@@ -185,10 +185,11 @@ def confirm_purchase_order(order_ref: str) -> str:
 @mcp.tool()
 def post_invoice(partner_name: str = "", amount: float | None = None,
                  invoice_date: str | None = None, invoice_id: int = 0) -> str:
-    """Phát hành hóa đơn nháp (account.move draft → posted) của một khách hàng.
-    Áp dụng cho cả hóa đơn bán và hóa đơn mua. Hóa đơn nháp CHƯA có số (số được
-    cấp khi phát hành), nên tra theo tên khách. Nếu khách có nhiều hóa đơn nháp,
-    truyền thêm amount hoặc invoice_date để chọn đúng cái.
+    """Phát hành hóa đơn/credit memo nháp (account.move draft → posted) của
+    một khách hàng — áp dụng cho cả hóa đơn (out_invoice/in_invoice) VÀ
+    credit memo (out_refund/in_refund).
+    Hóa đơn nháp CHƯA có số (số được cấp khi phát hành), nên tra theo tên khách.
+    Nếu khách có nhiều hóa đơn nháp, truyền thêm amount hoặc invoice_date để chọn đúng cái.
     YÊU CẦU XÁC NHẬN từ người dùng trước khi gọi.
 
     Args:
@@ -200,7 +201,8 @@ def post_invoice(partner_name: str = "", amount: float | None = None,
     if invoice_id:
         rows = odoo("account.move", "search_read",
                     [[["id", "=", invoice_id],
-                      ["move_type", "in", ["out_invoice", "in_invoice"]]]],
+                      ["move_type", "in", ["out_invoice", "in_invoice",
+                                           "out_refund", "in_refund"]]]],
                     {"fields": ["id", "name", "state", "partner_id"], "limit": 1})
         if not rows:
             return envelope(False, f"Không tìm thấy hóa đơn ID {invoice_id}.")
@@ -224,7 +226,8 @@ def post_invoice(partner_name: str = "", amount: float | None = None,
         return envelope(False,
                         "Vui lòng cho biết khách hàng (hoặc ID) của hóa đơn nháp.")
 
-    domain = [["move_type", "in", ["out_invoice", "in_invoice"]],
+    domain = [["move_type", "in", ["out_invoice", "in_invoice",
+                                   "out_refund", "in_refund"]],
               ["state", "=", "draft"],
               ["partner_id.name", "ilike", partner_name]]
     if amount is not None:
@@ -1611,6 +1614,57 @@ def return_order(picking_id: int, lines: list | None = None) -> str:
                         res_id=new_id, state=new_pick["state"])
     except Exception as e:  # noqa: BLE001
         return envelope(False, f"Lỗi khi tạo phiếu trả hàng: {e}")
+
+
+@mcp.tool()
+def create_credit_memo(invoice_id: int, reason: str = "") -> str:
+    """Tạo biên lai tín dụng (credit memo, account.move type 'out_refund')
+    hoàn TOÀN BỘ số tiền một hóa đơn khách hàng ĐÃ PHÁT HÀNH. Nhận ID ĐÃ
+    resolve (coordinator lo resolve số hóa đơn). Chỉ tạo NHÁP — phát hành
+    là bước riêng (post_invoice). YÊU CẦU XÁC NHẬN từ người dùng trước khi
+    gọi.
+
+    Args:
+        invoice_id: ID hóa đơn khách hàng (account.move) ĐÃ posted.
+        reason: Lý do hoàn (tùy chọn, hiển thị trên credit memo).
+    """
+    try:
+        rows = odoo("account.move", "search_read",
+                    [[["id", "=", invoice_id],
+                      ["move_type", "=", "out_invoice"]]],
+                    {"fields": ["id", "name", "state", "partner_id",
+                                "journal_id"], "limit": 1})
+        if not rows:
+            return envelope(False, f"Không tìm thấy hóa đơn khách ID {invoice_id}.")
+        inv = rows[0]
+        if inv["state"] != "posted":
+            return envelope(False, f"Hóa đơn {inv['name']} chưa phát hành, "
+                                   f"không thể tạo credit memo.")
+
+        vals = {"move_ids": [(6, 0, [invoice_id])],
+                "journal_id": inv["journal_id"][0]}
+        if reason:
+            vals["reason"] = reason
+        wiz_id = odoo("account.move.reversal", "create", [vals])
+        odoo("account.move.reversal", "refund_moves", [[wiz_id]])
+        wiz = odoo("account.move.reversal", "read", [[wiz_id]],
+                   {"fields": ["new_move_ids"]})[0]
+        new_ids = wiz["new_move_ids"]
+        if not new_ids:
+            return envelope(False, f"Không tạo được credit memo cho hóa đơn "
+                                   f"{inv['name']} — vui lòng kiểm tra trên "
+                                   f"Odoo.")
+        new_id = new_ids[0]
+        cn = odoo("account.move", "read", [[new_id]],
+                  {"fields": ["state", "amount_total"]})[0]
+        partner = inv["partner_id"][1] if inv["partner_id"] else "?"
+        return envelope(True,
+                        f"Đã tạo credit memo (nháp) cho hóa đơn {inv['name']} "
+                        f"của {partner}: {cn['amount_total']:,.0f}.",
+                        ref=None, model="account.move", res_id=new_id,
+                        state=cn["state"])
+    except Exception as e:  # noqa: BLE001
+        return envelope(False, f"Lỗi khi tạo credit memo: {e}")
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────

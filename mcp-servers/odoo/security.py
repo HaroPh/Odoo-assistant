@@ -29,6 +29,7 @@ ODOO_METHOD_OPERATION_MAP = {
     "button_mark_done": "write",
     "action_assign": "write",
     "action_create_returns": "write",
+    "refund_moves": "write",
     # UNLINK — Phase 3: cần confirmation + cảnh báo
     "unlink": "unlink", "action_delete": "unlink",
 }
