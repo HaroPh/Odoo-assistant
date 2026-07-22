@@ -207,3 +207,55 @@ def open_mo_count_for_bom(bom_id, *, gw=None):
         return err(f"Lỗi tra cứu lệnh sản xuất: {e}")
     return ok({"count": len(rows), "capped": len(rows) >= 100},
               f"{len(rows)} lệnh sản xuất đang mở.")
+
+
+def count_pending_sale_orders_for_kit(bom_id, *, gw=None):
+    """NỘI BỘ (coordinator update_bom cảnh báo blast-radius cho Kit) — số
+    đơn bán ĐÃ XÁC NHẬN nhưng CHƯA GIAO XONG có chứa sản phẩm Kit của BoM
+    này. Kit đóng băng công thức tại thời điểm XÁC NHẬN ĐƠN (probe
+    2026-07-22, khác MO đóng băng tại thời điểm TẠO lệnh) — không có FK
+    trực tiếp như mrp.production.bom_id, phải đi qua sale.order.line →
+    sale.order → stock.picking. Dùng BULK query cho stock.picking (1 lần
+    gọi id in [toàn bộ pick_ids], group Python) thay vì loop N lần theo
+    từng đơn — ít round-trip hơn, và tránh cần fake theo domain trong test."""
+    gw = gw or default_gateway()
+    try:
+        brows = gw.search_read("mrp.bom", [["id", "=", bom_id]],
+                               ["product_tmpl_id"], limit=1)
+        if not brows:
+            return err(f"Không tìm thấy BoM {bom_id}.")
+        tmpl_id = brows[0]["product_tmpl_id"][0]
+        variants = gw.search_read("product.product",
+                                  [["product_tmpl_id", "=", tmpl_id]],
+                                  ["id"], limit=50)
+        vids = [v["id"] for v in variants]
+        if not vids:
+            return ok({"count": 0, "capped": False}, "0 đơn bán đang chờ giao.")
+        lines = gw.search_read("sale.order.line",
+                               [["product_id", "in", vids],
+                                ["order_id.state", "=", "sale"]],
+                               ["order_id"], limit=100)
+        order_ids = sorted({l["order_id"][0] for l in lines})
+        if not order_ids:
+            return ok({"count": 0, "capped": False}, "0 đơn bán đang chờ giao.")
+        orders = gw.search_read("sale.order", [["id", "in", order_ids]],
+                                ["picking_ids"], limit=100)
+        all_pick_ids = sorted({pid for o in orders
+                               for pid in (o.get("picking_ids") or [])})
+        pick_state = {}
+        if all_pick_ids:
+            prows = gw.search_read("stock.picking", [["id", "in", all_pick_ids]],
+                                   ["id", "state"], limit=100)
+            pick_state = {p["id"]: p["state"] for p in prows}
+    except Exception as e:                                  # noqa: BLE001
+        return err(f"Lỗi tra cứu đơn bán: {e}")
+    at_risk = 0
+    for o in orders:
+        pick_ids = o.get("picking_ids") or []
+        if not pick_ids:
+            continue
+        if any(pick_state.get(pid) != "done" for pid in pick_ids):
+            at_risk += 1
+    capped = len(order_ids) >= 100
+    return ok({"count": at_risk, "capped": capped},
+              f"{at_risk} đơn bán đang chờ giao.")

@@ -185,3 +185,53 @@ def test_open_mo_count_capped_at_100():
     gw = _gw({"mrp.production": [{"id": i} for i in range(100)]})
     out = mrp.open_mo_count_for_bom(9, gw=gw)
     assert out["data"]["count"] == 100 and out["data"]["capped"] is True
+
+
+def test_pending_kit_orders_counts_undelivered_only():
+    gw = _gw({
+        "mrp.bom": [{"id": 6, "product_tmpl_id": [48, "Table Kit"]}],
+        "product.product": [{"id": 66}],
+        "sale.order.line": [{"id": 1, "order_id": [119, "S00119"]},
+                            {"id": 2, "order_id": [120, "S00120"]}],
+        "sale.order": [{"id": 119, "picking_ids": [154]},
+                       {"id": 120, "picking_ids": [155]}],
+        "stock.picking": [{"id": 154, "state": "assigned"},
+                          {"id": 155, "state": "done"}],
+    })
+    out = mrp.count_pending_sale_orders_for_kit(6, gw=gw)
+    assert out["status"] == "success"
+    assert out["data"]["count"] == 1          # only order 119 (picking not done)
+    assert out["data"]["capped"] is False
+
+
+def test_pending_kit_orders_bom_not_found():
+    gw = _gw({"mrp.bom": []})
+    out = mrp.count_pending_sale_orders_for_kit(999, gw=gw)
+    assert out["status"] == "error"
+
+
+def test_pending_kit_orders_zero_when_no_matching_lines():
+    gw = _gw({
+        "mrp.bom": [{"id": 6, "product_tmpl_id": [48, "Table Kit"]}],
+        "product.product": [{"id": 66}],
+        "sale.order.line": [],
+    })
+    out = mrp.count_pending_sale_orders_for_kit(6, gw=gw)
+    assert out["status"] == "success"
+    assert out["data"]["count"] == 0 and out["data"]["capped"] is False
+
+
+def test_pending_kit_orders_capped_at_100():
+    gw = _gw({
+        "mrp.bom": [{"id": 6, "product_tmpl_id": [48, "Table Kit"]}],
+        "product.product": [{"id": 66}],
+        "sale.order.line": [{"id": i, "order_id": [1000 + i, f"S{1000+i}"]}
+                            for i in range(100)],
+        "sale.order": [{"id": 1000 + i, "picking_ids": [2000 + i]}
+                       for i in range(100)],
+        "stock.picking": [{"id": 2000 + i, "state": "assigned"}
+                          for i in range(100)],
+    })
+    out = mrp.count_pending_sale_orders_for_kit(6, gw=gw)
+    assert out["status"] == "success"
+    assert out["data"]["capped"] is True
