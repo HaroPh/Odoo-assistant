@@ -125,3 +125,79 @@ def test_rerank_pairs_include_section_path(clean_tables, monkeypatch):
     r.retrieve("hoàn hàng", k=5, conn=clean_tables)
     # _seed chèn section_path="A › B" → pair = crumb + body
     assert seen == ["A › B Khách hàng hoàn hàng trong 30 ngày"]
+
+
+# ── aux_queries: multi-query candidate pooling ─────────────────────────────
+
+
+def test_rrf_accumulates_into_existing_acc():
+    from backend.src.rag.retrieve import _rrf
+    dense1 = [(1, "d1", "f1", "t1", None, None, None, None, "x", 0.9)]
+    acc = _rrf(dense1, [])
+    dense2 = [(2, "d2", "f2", "t2", None, None, None, None, "y", 0.8)]
+    merged = _rrf(dense2, [], acc=acc)
+    assert merged is acc  # mutates + returns the SAME dict passed in
+    assert set(merged.keys()) == {1, 2}
+    assert merged[1]["rrf"] > 0 and merged[2]["rrf"] > 0
+
+
+def test_retrieve_without_aux_query_never_calls_embed_query_extra(clean_tables, monkeypatch):
+    from backend.src.rag import retrieve as r
+    _seed(clean_tables, [
+        ("A", "Khách hàng hoàn hàng trong 30 ngày", [1.0] + [0.0] * 1023),
+    ])
+    calls = []
+
+    def fake_embed(q):
+        calls.append(q)
+        return [1.0] + [0.0] * 1023
+
+    monkeypatch.setattr(r, "embed_query", fake_embed)
+    r.retrieve("chính sách hoàn hàng", k=5, conn=clean_tables)
+    assert calls == ["chính sách hoàn hàng"]  # default aux_queries=() → no extra call
+
+
+def test_retrieve_aux_query_equal_to_primary_is_skipped(clean_tables, monkeypatch):
+    from backend.src.rag import retrieve as r
+    _seed(clean_tables, [
+        ("A", "Khách hàng hoàn hàng trong 30 ngày", [1.0] + [0.0] * 1023),
+    ])
+    calls = []
+
+    def fake_embed(q):
+        calls.append(q)
+        return [1.0] + [0.0] * 1023
+
+    monkeypatch.setattr(r, "embed_query", fake_embed)
+    r.retrieve("chính sách hoàn hàng", k=5, conn=clean_tables,
+               aux_queries=("chính sách hoàn hàng",))
+    assert calls == ["chính sách hoàn hàng"]  # aux == query → no 2nd embed call
+
+
+def test_retrieve_aux_query_pulls_crowded_out_doc_into_pool(clean_tables, monkeypatch):
+    """Reproduces the real bug's shape: 20 distractors all rank closer to the
+    primary query than the true target doc, pushing it out of _dense()'s
+    TOP_N=20 fetch window entirely. aux_queries must still recover it — doc B
+    gets a dense AND sparse hit on the aux query (rank-0 on both channels),
+    which is mathematically guaranteed to outscore any single distractor's
+    best possible combined score (see spec Findings — no reliance on SQL
+    tie-break order)."""
+    from backend.src.rag import retrieve as r
+    rows = [(f"D{i}", f"distractor {i}", [1.0, float(i + 1)] + [0.0] * 1022)
+            for i in range(20)]
+    rows.append(("B", "qb noi dung tai lieu dich", [0.0] * 1023 + [1.0]))
+    _seed(clean_tables, rows)
+
+    VEC_A = [1.0] + [0.0] * 1023
+    VEC_B = [0.0] * 1023 + [1.0]
+
+    def fake_embed(q):
+        return VEC_B if q == "qB" else VEC_A
+
+    monkeypatch.setattr(r, "embed_query", fake_embed)
+
+    without_aux = r.retrieve("qA", k=25, conn=clean_tables)
+    assert "B" not in [c.doc_id for c in without_aux.chunks]
+
+    with_aux = r.retrieve("qA", k=25, conn=clean_tables, aux_queries=("qB",))
+    assert "B" in [c.doc_id for c in with_aux.chunks]

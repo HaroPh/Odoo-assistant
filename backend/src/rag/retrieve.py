@@ -29,9 +29,13 @@ def _sparse(conn, qseg) -> list[tuple]:
     ).fetchall()
 
 
-def _rrf(dense: list[tuple], sparse: list[tuple]) -> dict:
-    """Reciprocal Rank Fusion → {row_id: {'row', 'rrf', 'dense', 'sparse'}}."""
-    acc: dict = {}
+def _rrf(dense: list[tuple], sparse: list[tuple], acc: dict | None = None) -> dict:
+    """Reciprocal Rank Fusion → {row_id: {'row', 'rrf', 'dense', 'sparse'}}.
+
+    acc: accumulator to extend (default: fresh dict). Passing an existing
+    dict lets retrieve() fold multiple queries' dense/sparse results into
+    one pool (aux_queries) — dedup by row id is inherent to the dict."""
+    acc = {} if acc is None else acc
     for rank, row in enumerate(dense):
         acc.setdefault(row[0], {"row": row, "rrf": 0.0, "dense": None, "sparse": None})
         acc[row[0]]["rrf"] += 1.0 / (RRF_K + rank + 1)
@@ -68,7 +72,8 @@ def compress(query: str, chunks: list[Chunk], k: int) -> list[Chunk]:
     return chunks[:k]  # Phase 2: top-k selection (extractive slot)
 
 
-def retrieve(query: str, k: int = TOP_K, conn=None) -> RetrievalResult:
+def retrieve(query: str, k: int = TOP_K, conn=None,
+             aux_queries: tuple[str, ...] = ()) -> RetrievalResult:
     own = conn is None
     if own:
         conn = _db.connect()
@@ -78,6 +83,12 @@ def retrieve(query: str, k: int = TOP_K, conn=None) -> RetrievalResult:
         qseg = segment_vi(query)
         dense, sparse = _dense(conn, qvec), _sparse(conn, qseg)
         fused = _rrf(dense, sparse)
+        for aux in aux_queries:
+            if aux == query:
+                continue
+            aux_dense = _dense(conn, embed_query(aux))
+            aux_sparse = _sparse(conn, segment_vi(aux))
+            fused = _rrf(aux_dense, aux_sparse, acc=fused)
         ordered = sorted(fused.values(), key=lambda e: e["rrf"], reverse=True)
 
         # Pool RỘNG (TOP_N) cho reranker chọn lọc, cắt k SAU rerank —
