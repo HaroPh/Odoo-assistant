@@ -133,6 +133,15 @@ Quy tắc:
 
 Sau khi trả lời xong, LUÔN thêm một dòng CUỐI CÙNG theo đúng định dạng: NGUỒN_DÙNG: <số thứ tự các đoạn tài liệu do search_documents trả về mà bạn đã dùng để trả lời, cách nhau bởi dấu phẩy>. Ví dụ: NGUỒN_DÙNG: 2,5. Nếu không dùng đoạn tài liệu nào (câu hỏi chỉ cần dữ liệu ERP), bỏ qua dòng này. /no_think"""
 
+CITATION_VERIFY_PROMPT = """Bạn kiểm tra xem mỗi đoạn tài liệu có thực sự chứa căn cứ hỗ trợ câu trả lời cho trước hay không.
+
+Với MỖI đoạn, trả lời CÓ hoặc KHÔNG, đúng định dạng, mỗi dòng một đoạn:
+1: CÓ hoặc KHÔNG
+2: CÓ hoặc KHÔNG
+...
+
+KHÔNG giải thích. KHÔNG thêm chữ nào khác ngoài định dạng trên. /no_think"""
+
 
 def render_working_context(wc: dict) -> str:
     """Khối ngữ cảnh ghép vào system prompt. Đặt TRƯỚC prompt gốc (caller làm)

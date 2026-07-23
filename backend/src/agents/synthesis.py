@@ -10,7 +10,7 @@ import re
 
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from .prompts import RAG_SYNTHESIS_PROMPT
+from .prompts import RAG_SYNTHESIS_PROMPT, CITATION_VERIFY_PROMPT
 
 COS_FLOOR = float(os.environ.get("RAG_NO_RESULT_COS_FLOOR", "0.35"))
 SENTINEL = "KHÔNG_ĐỦ_THÔNG_TIN"
@@ -62,6 +62,29 @@ def extract_used_citations(body: str, chunks: list) -> tuple[str, str]:
     if not used:
         return clean, build_citations(chunks)
     return clean, build_citations(used)
+
+
+async def verify_citations(answer: str, chunks: list, llm) -> list:
+    """Xác minh lại các chunk được đánh dấu đã dùng bằng 1 lệnh gọi LLM,
+    đối chiếu với nội dung THẬT của từng chunk — không chỉ tin lời tự khai
+    của marker NGUỒN_DÙNG. Fail-open toàn phần (lỗi/timeout → giữ nguyên
+    chunks) và từng dòng (verdict thiếu/không parse được → giữ, chỉ loại
+    khi có KHÔNG tường minh)."""
+    if not chunks:
+        return chunks
+    try:
+        resp = await llm.ainvoke([
+            SystemMessage(content=CITATION_VERIFY_PROMPT),
+            HumanMessage(content=(
+                f"CÂU TRẢ LỜI:\n{answer}\n\nCÁC ĐOẠN TÀI LIỆU:\n"
+                + _format_context(chunks))),
+        ])
+        verdicts = dict(re.findall(r'(\d+):\s*(CÓ|KHÔNG)', resp.content or "",
+                                   re.IGNORECASE))
+        return [c for i, c in enumerate(chunks, start=1)
+                if verdicts.get(str(i), "").upper() != "KHÔNG"]
+    except Exception:
+        return chunks
 
 
 def _format_context(chunks, start: int = 1) -> str:

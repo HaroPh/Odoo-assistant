@@ -112,6 +112,7 @@ from unittest.mock import AsyncMock, MagicMock
 from backend.src.rag.types import RetrievalResult
 from backend.src.agents import synthesis as syn
 from backend.tests.conftest import make_mock_llm
+from backend.src.agents.synthesis import verify_citations
 
 
 def _result(chunks):
@@ -192,3 +193,52 @@ def test_passes_floor_sparse_only():
 
 def test_passes_floor_empty():
     assert syn.passes_floor(_result([])) is False
+
+
+@pytest.mark.asyncio
+async def test_verify_citations_empty_chunks_no_llm_call():
+    llm = MagicMock(); llm.ainvoke = AsyncMock()
+    out = await verify_citations("answer", [], llm)
+    assert out == []
+    llm.ainvoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_verify_citations_keeps_yes_drops_no():
+    llm = make_mock_llm("1: CÓ\n2: KHÔNG")
+    chunks = _two_chunks()
+    out = await verify_citations("Trả lời.", chunks, llm)
+    assert out == [chunks[0]]
+
+
+@pytest.mark.asyncio
+async def test_verify_citations_all_yes_keeps_all():
+    llm = make_mock_llm("1: CÓ\n2: CÓ")
+    chunks = _two_chunks()
+    out = await verify_citations("Trả lời.", chunks, llm)
+    assert out == chunks
+
+
+@pytest.mark.asyncio
+async def test_verify_citations_llm_error_fails_open():
+    llm = MagicMock()
+    llm.ainvoke = AsyncMock(side_effect=RuntimeError("llm down"))
+    chunks = _two_chunks()
+    out = await verify_citations("Trả lời.", chunks, llm)
+    assert out == chunks
+
+
+@pytest.mark.asyncio
+async def test_verify_citations_unparseable_response_fails_open():
+    llm = make_mock_llm("không rõ định dạng gì cả")
+    chunks = _two_chunks()
+    out = await verify_citations("Trả lời.", chunks, llm)
+    assert out == chunks
+
+
+@pytest.mark.asyncio
+async def test_verify_citations_missing_verdict_for_one_chunk_keeps_it():
+    llm = make_mock_llm("1: KHÔNG")  # no line for chunk 2
+    chunks = _two_chunks()
+    out = await verify_citations("Trả lời.", chunks, llm)
+    assert out == [chunks[1]]
