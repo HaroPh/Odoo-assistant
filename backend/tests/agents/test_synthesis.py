@@ -53,43 +53,40 @@ def _two_chunks():
 
 def test_extract_used_citations_single_index_filters_footer():
     chunks = _two_chunks()
-    clean, footer = extract_used_citations(
+    clean, used = extract_used_citations(
         f"Trả lời dựa tài liệu 1.\n\n{USED_MARKER}: 1", chunks)
     assert clean == "Trả lời dựa tài liệu 1."
-    assert "policy.docx" in footer
-    assert "sla.docx" not in footer
+    assert used == [chunks[0]]
 
 
 def test_extract_used_citations_multiple_indices_keep_retrieval_order():
     chunks = _two_chunks()
-    clean, footer = extract_used_citations(
+    clean, used = extract_used_citations(
         f"Trả lời dựa cả hai.\n\n{USED_MARKER}: 2,1", chunks)
-    assert footer.count("•") == 2
-    assert footer.index("policy.docx") < footer.index("sla.docx")
+    assert used == [chunks[0], chunks[1]]
 
 
 def test_extract_used_citations_missing_marker_falls_back_to_all():
     chunks = _two_chunks()
-    clean, footer = extract_used_citations("Trả lời không có marker.", chunks)
+    clean, used = extract_used_citations("Trả lời không có marker.", chunks)
     assert clean == "Trả lời không có marker."
-    assert "policy.docx" in footer and "sla.docx" in footer
+    assert used == chunks
 
 
 def test_extract_used_citations_out_of_range_indices_fall_back_but_strip_marker():
     chunks = _two_chunks()
-    clean, footer = extract_used_citations(
+    clean, used = extract_used_citations(
         f"Trả lời.\n\n{USED_MARKER}: 5,9", chunks)
     assert clean == "Trả lời."
     assert USED_MARKER not in clean
-    assert "policy.docx" in footer and "sla.docx" in footer
+    assert used == chunks
 
 
 def test_extract_used_citations_duplicate_indices_dedupe():
     chunks = _two_chunks()
-    clean, footer = extract_used_citations(
+    clean, used = extract_used_citations(
         f"Trả lời.\n\n{USED_MARKER}: 1,1,1", chunks)
-    assert footer.count("•") == 1
-    assert "policy.docx" in footer
+    assert used == [chunks[0]]
 
 
 def test_format_context_default_start_numbers_from_one():
@@ -111,7 +108,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 from backend.src.rag.types import RetrievalResult
 from backend.src.agents import synthesis as syn
-from backend.tests.conftest import make_mock_llm
+from backend.tests.conftest import make_mock_llm, make_mock_llm_seq
 from backend.src.agents.synthesis import verify_citations
 
 
@@ -140,7 +137,7 @@ async def test_synthesize_below_floor_no_sparse_returns_guard_without_llm():
 
 @pytest.mark.asyncio
 async def test_synthesize_sparse_only_passes_prefilter_and_calls_llm():
-    llm = make_mock_llm("Trả lời từ tài liệu.")
+    llm = make_mock_llm_seq(["Trả lời từ tài liệu.", "1: CÓ"])
     c = _chunk(dense_score=None, sparse_score=0.1)
     out = await syn.synthesize("q", _result([c]), llm)
     assert "Trả lời từ tài liệu." in out  # LLM was used (pre-filter passed via sparse hit)
@@ -156,7 +153,7 @@ async def test_synthesize_sentinel_returns_guard():
 
 @pytest.mark.asyncio
 async def test_synthesize_happy_appends_footer():
-    llm = make_mock_llm("Khách được hoàn trong 30 ngày.")
+    llm = make_mock_llm_seq(["Khách được hoàn trong 30 ngày.", "1: CÓ"])
     c = _chunk(dense_score=0.7, section_path="Chính sách hoàn hàng › Mục 1",
                source_file="C:/docs/policy.docx", page=1)
     out = await syn.synthesize("q", _result([c]), llm)
@@ -167,7 +164,8 @@ async def test_synthesize_happy_appends_footer():
 
 @pytest.mark.asyncio
 async def test_synthesize_with_marker_filters_footer_to_used_chunk():
-    llm = make_mock_llm(f"Khách được hoàn trong 30 ngày.\n\n{syn.USED_MARKER}: 1")
+    llm = make_mock_llm_seq([
+        f"Khách được hoàn trong 30 ngày.\n\n{syn.USED_MARKER}: 1", "1: CÓ"])
     c1 = _chunk(chunk_id=1, dense_score=0.7, section_path="Chính sách hoàn hàng › Mục 1",
                source_file="C:/docs/policy.docx", page=1)
     c2 = _chunk(chunk_id=2, dense_score=0.6, section_path="SLA › Điều 2",
@@ -175,6 +173,19 @@ async def test_synthesize_with_marker_filters_footer_to_used_chunk():
     out = await syn.synthesize("q", _result([c1, c2]), llm)
     assert "Khách được hoàn trong 30 ngày." in out
     assert syn.USED_MARKER not in out
+    assert "policy.docx" in out
+    assert "sla.docx" not in out
+
+
+@pytest.mark.asyncio
+async def test_synthesize_verify_drops_unsupported_citation():
+    llm = make_mock_llm_seq([
+        f"Khách được hoàn trong 30 ngày.\n\n{syn.USED_MARKER}: 1,2", "1: CÓ\n2: KHÔNG"])
+    c1 = _chunk(chunk_id=1, dense_score=0.7, section_path="Chính sách hoàn hàng › Mục 1",
+               source_file="C:/docs/policy.docx", page=1)
+    c2 = _chunk(chunk_id=2, dense_score=0.6, section_path="SLA › Điều 2",
+               source_file="C:/docs/sla.docx", page=3)
+    out = await syn.synthesize("q", _result([c1, c2]), llm)
     assert "policy.docx" in out
     assert "sla.docx" not in out
 

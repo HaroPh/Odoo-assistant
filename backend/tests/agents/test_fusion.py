@@ -80,6 +80,7 @@ from unittest.mock import MagicMock, AsyncMock
 from langchain_core.messages import HumanMessage, AIMessage
 from backend.src.agents.state import ERPAgentState
 from backend.src.agents.synthesis import SAFE_MSG
+from backend.tests.conftest import make_mock_llm
 
 
 def _state(text: str) -> ERPAgentState:
@@ -129,7 +130,7 @@ async def test_fusion_happy_path_appends_footer(monkeypatch):
 
     monkeypatch.setattr(fusion_mod, "_create_agent", fake_create_agent)
 
-    node = fusion_mod.make_fusion_node(MagicMock(), tools=[])
+    node = fusion_mod.make_fusion_node(make_mock_llm("1: CÓ"), tools=[])
     out = await node(_state("theo chính sách, đơn X hoàn được không?"))
     content = out["messages"][0].content
     assert "Khách đã quá hạn, không được hoàn." in content
@@ -162,7 +163,7 @@ async def test_fusion_marker_filters_footer_to_second_call_chunk(monkeypatch):
 
     monkeypatch.setattr(fusion_mod, "_create_agent", fake_create_agent)
 
-    node = fusion_mod.make_fusion_node(MagicMock(), tools=[])
+    node = fusion_mod.make_fusion_node(make_mock_llm("1: CÓ"), tools=[])
     out = await node(_state("SLA xử lý trong bao lâu?"))
     content = out["messages"][0].content
     assert "Theo SLA, xử lý trong 24h." in content

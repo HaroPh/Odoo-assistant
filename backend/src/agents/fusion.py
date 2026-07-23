@@ -18,7 +18,7 @@ from langchain.agents import create_agent as _create_agent
 
 from .state import ERPAgentState
 from .prompts import FUSION_PROMPT
-from .synthesis import passes_floor, _format_context, extract_used_citations, SAFE_MSG
+from .synthesis import passes_floor, _format_context, cite_and_verify, SAFE_MSG
 from ..rag.retrieve import retrieve
 
 logger = logging.getLogger(__name__)
@@ -77,8 +77,7 @@ def make_fusion_node(llm, tools):
             answer = (result["messages"][-1].content or "").strip()
             if not answer:
                 return {"messages": [AIMessage(content=SAFE_MSG)]}
-            clean, footer = extract_used_citations(answer, collected)
-            answer = clean + footer
+            answer = await cite_and_verify(answer, collected, llm)
         except Exception:
             logger.exception("fusion_node failed")
             answer = SAFE_MSG

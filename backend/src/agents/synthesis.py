@@ -49,19 +49,20 @@ def build_citations(chunks) -> str:
     return "\n\n📄 Nguồn:\n" + "\n".join(lines)
 
 
-def extract_used_citations(body: str, chunks: list) -> tuple[str, str]:
-    """Strip the LLM's NGUỒN_DÙNG marker line and build a citation footer
-    limited to the chunks it names. Falls back to citing all chunks if the
-    marker is missing or names no valid chunk index."""
+def extract_used_citations(body: str, chunks: list) -> tuple[str, list]:
+    """Strip the LLM's NGUỒN_DÙNG marker line and resolve which chunks it
+    names. Falls back to all chunks if the marker is missing or names no
+    valid chunk index. Caller verifies (verify_citations) and builds the
+    citation footer (build_citations) from the returned list."""
     m = _MARKER_RE.search(body)
     if not m:
-        return body, build_citations(chunks)
+        return body, chunks
     clean = body[:m.start()].rstrip()
     indices = {int(x) for x in re.findall(r'\d+', m.group(1))}
     used = [c for i, c in enumerate(chunks, start=1) if i in indices]
     if not used:
-        return clean, build_citations(chunks)
-    return clean, build_citations(used)
+        return clean, chunks
+    return clean, used
 
 
 async def verify_citations(answer: str, chunks: list, llm) -> list:
@@ -85,6 +86,16 @@ async def verify_citations(answer: str, chunks: list, llm) -> list:
                 if verdicts.get(str(i), "").upper() != "KHÔNG"]
     except Exception:
         return chunks
+
+
+async def cite_and_verify(body: str, chunks: list, llm) -> str:
+    """Full citation pipeline shared by synthesize() and fusion_node:
+    resolve which chunks the marker claims were used (extract_used_citations),
+    verify that claim against real chunk content (verify_citations), then
+    build the footer from whatever survives (build_citations)."""
+    clean, used = extract_used_citations(body, chunks)
+    verified = await verify_citations(clean, used, llm)
+    return clean + build_citations(verified)
 
 
 def _format_context(chunks, start: int = 1) -> str:
@@ -114,7 +125,9 @@ async def synthesize(query: str, result, llm) -> str:
     """Grounded answer + citation footer, or GUARD_MSG when nothing answers.
 
     Guard = cheap cosine pre-filter (no LLM on an obviously-empty/off-topic
-    retrieval) backed by the LLM answerability sentinel.
+    retrieval) backed by the LLM answerability sentinel. Citations are
+    verified against real chunk content (verify_citations) before the
+    footer is built, not just trusted from the LLM's marker self-report.
     """
     if result.is_empty() or not passes_floor(result):
         return GUARD_MSG
@@ -125,5 +138,4 @@ async def synthesize(query: str, result, llm) -> str:
     body = (resp.content or "").strip()
     if SENTINEL in body:
         return GUARD_MSG
-    clean, footer = extract_used_citations(body, result.chunks)
-    return clean + footer
+    return await cite_and_verify(body, result.chunks, llm)
