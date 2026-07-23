@@ -12,7 +12,8 @@ from mcp.server.fastmcp import FastMCP
 
 from config import ODOO_URL, ODOO_DB, ODOO_USER, ODOO_PWD
 from security import (ODOO_METHOD_OPERATION_MAP, classify_operation,
-                      sanitize_model, sanitize_payload_keys)
+                      forbid_extra_kwargs, sanitize_model,
+                      sanitize_payload_keys)
 from rate_limit import check_rate_limit
 from event_log import log_mcp_event
 from helpers import now_iso, today_iso, resolve_unique, envelope
@@ -1668,6 +1669,12 @@ def create_credit_memo(invoice_id: int, reason: str = "") -> str:
                         state=cn["state"])
     except Exception as e:  # noqa: BLE001
         return envelope(False, f"Lỗi khi tạo credit memo: {e}")
+
+
+# Chặn tool-call kwarg lạ ở mọi write-tool đã đăng ký — chạy 1 lần lúc
+# import, sau khi toàn bộ @mcp.tool() ở trên đã đăng ký xong. Tool đăng ký
+# thêm sau dòng này sẽ KHÔNG được bọc — mọi @mcp.tool() phải nằm trước.
+forbid_extra_kwargs(mcp._tool_manager)
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
