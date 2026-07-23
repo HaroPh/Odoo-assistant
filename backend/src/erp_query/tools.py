@@ -11,6 +11,17 @@ def _json(envelope) -> str:
     return json.dumps(envelope, ensure_ascii=False)
 
 
+def _forbid_extra_kwargs(t) -> None:
+    """Ép Pydantic reject tham số lạ trong tool call thay vì âm thầm bỏ
+    qua (mặc định extra='ignore') — biến 'tool chạy sai với default rỗng'
+    thành lỗi LLM nhìn thấy được. LangGraph's ToolNode đã tự bắt
+    ValidationError và trả 'Error: ... Please fix your mistakes.' cho LLM,
+    không cần code thêm ở tầng agent. Vô hại (không có tác dụng) với tool
+    0 tham số — xem test riêng ghi nhận giới hạn này."""
+    t.args_schema.model_config['extra'] = 'forbid'
+    t.args_schema.model_rebuild(force=True)
+
+
 def build_erp_query_tools() -> list:
     @tool
     def find_customer(name: str) -> str:
@@ -160,11 +171,14 @@ def build_erp_query_tools() -> list:
         khách) và phải trả (nếu là NCC)."""
         return _json(accounting.get_partner_balance(name))
 
-    return [find_customer, find_supplier, find_product, list_sale_orders,
-            get_sale_order_detail, get_product_price, sales_summary, top_products,
-            get_stock, get_lots, list_purchase_orders, get_purchase_order_detail,
-            list_suppliers, get_product_suppliers, get_supplier_detail,
-            list_crm_leads, list_invoices, get_overdue_invoices,
-            list_reorder_needed, get_bom_detail, list_manufacturing_orders,
-            list_late_deliveries, check_po_matching, list_po_mismatches,
-            get_partner_balance]
+    tools = [find_customer, find_supplier, find_product, list_sale_orders,
+             get_sale_order_detail, get_product_price, sales_summary, top_products,
+             get_stock, get_lots, list_purchase_orders, get_purchase_order_detail,
+             list_suppliers, get_product_suppliers, get_supplier_detail,
+             list_crm_leads, list_invoices, get_overdue_invoices,
+             list_reorder_needed, get_bom_detail, list_manufacturing_orders,
+             list_late_deliveries, check_po_matching, list_po_mismatches,
+             get_partner_balance]
+    for t in tools:
+        _forbid_extra_kwargs(t)
+    return tools
