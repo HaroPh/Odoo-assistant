@@ -64,3 +64,17 @@ def sanitize_payload_keys(value, *, _depth: int = 0, _max_depth: int = 10) -> No
     elif isinstance(value, (list, tuple)):
         for item in value:
             sanitize_payload_keys(item, _depth=_depth + 1, _max_depth=_max_depth)
+
+
+def forbid_extra_kwargs(tool_manager) -> None:
+    """Ép mọi tool đã đăng ký trong tool_manager reject kwarg lạ trong
+    tool-call thay vì âm thầm bỏ qua (Pydantic mặc định extra='ignore'),
+    đồng thời refresh JSON schema quảng cáo cho LLM (tool.parameters) để
+    phản ánh đúng giới hạn additionalProperties: false. tool_manager nhận
+    qua tham số (không import trực tiếp mcp) để tránh circular import với
+    server.py."""
+    for tool in tool_manager.list_tools():
+        model = tool.fn_metadata.arg_model
+        model.model_config["extra"] = "forbid"
+        model.model_rebuild(force=True)
+        tool.parameters = model.model_json_schema(by_alias=True)
