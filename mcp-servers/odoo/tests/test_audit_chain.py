@@ -46,3 +46,16 @@ def test_compute_entry_hash_normalizes_timezone_before_hashing():
     h1 = audit_chain.compute_entry_hash(audit_chain.GENESIS_HASH, utc_ts, **_BASE_KWARGS)
     h2 = audit_chain.compute_entry_hash(audit_chain.GENESIS_HASH, plus7_ts, **_BASE_KWARGS)
     assert h1 == h2
+
+
+def test_compute_entry_hash_no_collision_across_field_boundary():
+    """Round 5 review bug: nối bằng ':' không escape khiến error_code='A'
+    + error_message='B:C' cho CÙNG hash với error_code='A:B' +
+    error_message='C'. Sau khi chuyển sang JSON-encode, phải cho ra hash
+    KHÁC NHAU."""
+    ts = datetime(2026, 7, 23, 10, 0, 0, tzinfo=timezone.utc)
+    kwargs_a = dict(_BASE_KWARGS, error_code="A", error_message="B:C")
+    kwargs_b = dict(_BASE_KWARGS, error_code="A:B", error_message="C")
+    h1 = audit_chain.compute_entry_hash(audit_chain.GENESIS_HASH, ts, **kwargs_a)
+    h2 = audit_chain.compute_entry_hash(audit_chain.GENESIS_HASH, ts, **kwargs_b)
+    assert h1 != h2
