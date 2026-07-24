@@ -27,7 +27,7 @@ async def test_search_documents_empty_returns_sentinel_no_collect(monkeypatch):
     import backend.src.agents.fusion as fusion_mod
     monkeypatch.setattr(fusion_mod, "retrieve", lambda q, *a, **kw: _result([]))
     collected = []
-    tool = fusion_mod._make_search_documents_tool(collected)
+    tool = fusion_mod._make_search_documents_tool(collected, "thủ đô nước Pháp?")
     out = await tool.ainvoke({"query": "thủ đô nước Pháp?"})
     assert out == "Không tìm thấy tài liệu liên quan."
     assert collected == []
@@ -39,7 +39,7 @@ async def test_search_documents_below_floor_returns_sentinel(monkeypatch):
     c = _chunk(dense_score=0.2, sparse_score=None)
     monkeypatch.setattr(fusion_mod, "retrieve", lambda q, *a, **kw: _result([c]))
     collected = []
-    tool = fusion_mod._make_search_documents_tool(collected)
+    tool = fusion_mod._make_search_documents_tool(collected, "câu ngoài corpus")
     out = await tool.ainvoke({"query": "câu ngoài corpus"})
     assert out == "Không tìm thấy tài liệu liên quan."
     assert collected == []
@@ -51,7 +51,7 @@ async def test_search_documents_passing_returns_text_and_collects(monkeypatch):
     c = _chunk(dense_score=0.7)
     monkeypatch.setattr(fusion_mod, "retrieve", lambda q, *a, **kw: _result([c]))
     collected = []
-    tool = fusion_mod._make_search_documents_tool(collected)
+    tool = fusion_mod._make_search_documents_tool(collected, "chính sách hoàn hàng")
     out = await tool.ainvoke({"query": "chính sách hoàn hàng"})
     assert "Hoàn hàng trong 30 ngày." in out
     assert len(collected) == 1
@@ -68,12 +68,73 @@ async def test_search_documents_second_call_numbers_continue(monkeypatch):
     results = iter([_result([c1]), _result([c2])])
     monkeypatch.setattr(fusion_mod, "retrieve", lambda q, *a, **kw: next(results))
     collected = []
-    tool = fusion_mod._make_search_documents_tool(collected)
+    tool = fusion_mod._make_search_documents_tool(collected, "chính sách hoàn hàng")
     out1 = await tool.ainvoke({"query": "chính sách hoàn hàng"})
     out2 = await tool.ainvoke({"query": "SLA"})
     assert out1.startswith("[1] ")
     assert out2.startswith("[2] ")
     assert len(collected) == 2
+
+
+@pytest.mark.asyncio
+async def test_search_documents_passes_original_question_as_aux_when_different(monkeypatch):
+    import backend.src.agents.fusion as fusion_mod
+    calls = []
+
+    def fake_retrieve(q, *a, **kw):
+        calls.append((q, kw.get("aux_queries")))
+        return _result([])
+
+    monkeypatch.setattr(fusion_mod, "retrieve", fake_retrieve)
+    collected = []
+    tool = fusion_mod._make_search_documents_tool(collected, "câu hỏi gốc đầy đủ")
+    await tool.ainvoke({"query": "SLA"})
+    assert calls == [("SLA", ("câu hỏi gốc đầy đủ",))]
+
+
+@pytest.mark.asyncio
+async def test_search_documents_skips_aux_when_query_equals_original(monkeypatch):
+    import backend.src.agents.fusion as fusion_mod
+    calls = []
+
+    def fake_retrieve(q, *a, **kw):
+        calls.append((q, kw.get("aux_queries")))
+        return _result([])
+
+    monkeypatch.setattr(fusion_mod, "retrieve", fake_retrieve)
+    collected = []
+    tool = fusion_mod._make_search_documents_tool(collected, "câu hỏi gốc đầy đủ")
+    await tool.ainvoke({"query": "câu hỏi gốc đầy đủ"})
+    assert calls == [("câu hỏi gốc đầy đủ", ())]
+
+
+@pytest.mark.asyncio
+async def test_fusion_node_binds_last_human_message_as_original_question(monkeypatch):
+    import backend.src.agents.fusion as fusion_mod
+    calls = []
+
+    def fake_retrieve(q, *a, **kw):
+        calls.append((q, kw.get("aux_queries")))
+        return _result([])
+
+    monkeypatch.setattr(fusion_mod, "retrieve", fake_retrieve)
+
+    def fake_create_agent(llm, tools, system_prompt=None):
+        search = next(t for t in tools if t.name == "search_documents")
+        agent = MagicMock()
+
+        async def ainvoke(payload):
+            await search.ainvoke({"query": "SLA"})
+            return {"messages": [AIMessage(content="ok")]}
+
+        agent.ainvoke = ainvoke
+        return agent
+
+    monkeypatch.setattr(fusion_mod, "_create_agent", fake_create_agent)
+
+    node = fusion_mod.make_fusion_node(MagicMock(), tools=[])
+    await node(_state("Theo SLA, đơn giao trong bao lâu?"))
+    assert calls == [("SLA", ("Theo SLA, đơn giao trong bao lâu?",))]
 
 
 from unittest.mock import MagicMock, AsyncMock

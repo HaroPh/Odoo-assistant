@@ -30,18 +30,25 @@ WRITE_TOOL_NAMES = frozenset({
 })
 
 
-def _make_search_documents_tool(collected: list):
+def _make_search_documents_tool(collected: list, original_question: str):
     """A search_documents tool bound to this turn's chunk collector.
 
     Returns labeled chunk text for the agent to read; records the Chunk objects
     into `collected` so the node can build a deterministic citation footer.
     Empty/off-topic retrieval (cosine pre-filter) → sentinel, collects nothing.
+
+    original_question is always folded in as a retrieval aux query (spec
+    2026-07-24-rag-routing-fallback) — the agent may pass a bare
+    keyword/acronym as `query` that never surfaces the right doc into the
+    candidate pool on its own (e.g. "SLA" never retrieves sla.docx), while
+    the full original question reliably does.
     """
     @tool
     async def search_documents(query: str) -> str:
         """Tìm trong tài liệu nội bộ (chính sách, SLA, quy trình, SOP, bảng giá)
         để lấy điều khoản hoặc thông tin liên quan đến câu hỏi."""
-        result = await asyncio.to_thread(retrieve, query)
+        aux = (original_question,) if query != original_question else ()
+        result = await asyncio.to_thread(retrieve, query, aux_queries=aux)
         if result.is_empty() or not passes_floor(result):
             return "Không tìm thấy tài liệu liên quan."
         # Assumes sequential tool calls (ReAct-style) — two concurrent calls
@@ -69,7 +76,7 @@ def make_fusion_node(llm, tools):
         if last_human is None:
             return {"messages": [AIMessage(content=SAFE_MSG)]}
         collected: list = []
-        search_tool = _make_search_documents_tool(collected)
+        search_tool = _make_search_documents_tool(collected, last_human.content)
         agent = _create_agent(llm, [*read_tools, search_tool],
                               system_prompt=FUSION_PROMPT)
         try:
