@@ -37,8 +37,11 @@ def _make_search_documents_tool(collected: list, original_question: str):
     into `collected` so the node can build a deterministic citation footer.
     Empty/off-topic retrieval (cosine pre-filter) → sentinel, collects nothing.
 
-    original_question is always folded in as a retrieval aux query (spec
-    2026-07-24-rag-routing-fallback) — the agent may pass a bare
+    original_question is folded in as a retrieval aux query whenever it
+    differs from the agent's own query (spec 2026-07-24-rag-routing-
+    fallback) — retrieve() also no-ops on an aux equal to the primary
+    query, so this check is a belt-and-suspenders skip, not the only
+    guard against a redundant embedding call. The agent may pass a bare
     keyword/acronym as `query` that never surfaces the right doc into the
     candidate pool on its own (e.g. "SLA" never retrieves sla.docx), while
     the full original question reliably does.
