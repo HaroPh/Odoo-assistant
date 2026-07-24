@@ -101,7 +101,8 @@ def retrieve(query: str, k: int = TOP_K, conn=None,
                 section_path=row[4], page=row[5], sheet=row[6], row_range=row[7],
                 text=row[8], dense_score=e["dense"], sparse_score=e["sparse"],
                 rrf_score=e["rrf"], rank=rank))
-        chunks, reranked = rerank(query, pool)
+        rerank_query = query if not aux_queries else query + "\n" + "\n".join(aux_queries)
+        chunks, reranked = rerank(rerank_query, pool)
         chunks = compress(query, chunks, k)
         return RetrievalResult(
             query=query, query_used=qseg, chunks=chunks,

@@ -201,3 +201,71 @@ def test_retrieve_aux_query_pulls_crowded_out_doc_into_pool(clean_tables, monkey
 
     with_aux = r.retrieve("qA", k=25, conn=clean_tables, aux_queries=("qB",))
     assert "B" in [c.doc_id for c in with_aux.chunks]
+
+
+# ── Task 3: rerank query concatenates aux_queries (spec Finding #7) ────────
+
+
+def test_rerank_query_includes_aux_when_present(clean_tables, monkeypatch):
+    from backend.src.rag import retrieve as r
+    _seed(clean_tables, [
+        ("A", "noi dung tai lieu", [1.0] + [0.0] * 1023),
+    ])
+    monkeypatch.setattr(r, "embed_query", lambda q: [1.0] + [0.0] * 1023)
+    seen = []
+
+    def _capture(q, texts):
+        seen.append(q)
+        return [0.5 for _ in texts]
+
+    monkeypatch.setattr(r.reranker, "score_pairs", _capture)
+    r.retrieve("SLA", k=5, conn=clean_tables,
+               aux_queries=("Theo SLA giao hang khan cap",))
+    assert seen == ["SLA\nTheo SLA giao hang khan cap"]
+
+
+def test_rerank_query_unchanged_when_no_aux(clean_tables, monkeypatch):
+    from backend.src.rag import retrieve as r
+    _seed(clean_tables, [
+        ("A", "noi dung tai lieu", [1.0] + [0.0] * 1023),
+    ])
+    monkeypatch.setattr(r, "embed_query", lambda q: [1.0] + [0.0] * 1023)
+    seen = []
+
+    def _capture(q, texts):
+        seen.append(q)
+        return [0.5 for _ in texts]
+
+    monkeypatch.setattr(r.reranker, "score_pairs", _capture)
+    r.retrieve("SLA", k=5, conn=clean_tables)  # aux_queries defaults to ()
+    assert seen == ["SLA"]  # no "\n" join — byte-for-byte pre-Task-3 behavior
+
+
+def test_rerank_recovers_doc_when_bare_query_lacks_context(clean_tables, monkeypatch):
+    """Deterministic version of the live bug (spec Finding #7): a fake
+    cross-encoder that can only recognize the right doc's content when the
+    AUX query's context reaches the rerank string — proves concatenation
+    (not just pooling) is what lets a bare-acronym primary query still
+    surface the doc in the final result."""
+    from backend.src.rag import retrieve as r
+    _seed(clean_tables, [
+        ("RIGHT", "dieu khoan SLA giao hang khan cap", [1.0, 1.0] + [0.0] * 1022),
+        ("WRONG", "chuong muc luat lao dong chung chung", [1.0, 0.9] + [0.0] * 1022),
+    ])
+    monkeypatch.setattr(r, "embed_query", lambda q: [1.0] + [0.0] * 1023)
+
+    def fake_score(q, texts):
+        # Only recognizes RIGHT's content when the rerank query carries the
+        # "khan cap" marker — absent from bare "SLA" alone, present only via
+        # the concatenated aux query.
+        return [1.0 if ("khan cap" in q and "dieu khoan SLA" in t) else 0.1
+                for t in texts]
+
+    monkeypatch.setattr(r.reranker, "score_pairs", fake_score)
+
+    without_aux = r.retrieve("SLA", k=2, conn=clean_tables)
+    assert without_aux.chunks[0].doc_id != "RIGHT"  # bare query alone can't recover it
+
+    with_aux = r.retrieve("SLA", k=2, conn=clean_tables,
+                          aux_queries=("SLA giao hang khan cap",))
+    assert with_aux.chunks[0].doc_id == "RIGHT"  # concatenation recovers it
