@@ -248,8 +248,12 @@ def test_rerank_recovers_doc_when_bare_query_lacks_context(clean_tables, monkeyp
     (not just pooling) is what lets a bare-acronym primary query still
     surface the doc in the final result."""
     from backend.src.rag import retrieve as r
+    # RIGHT's text deliberately does NOT contain the literal string "SLA" —
+    # if it did, plainto_tsquery('simple', 'SLA') would sparse-match it
+    # directly against the bare primary query alone, pre-empting the very
+    # thing this test isolates (whether rerank, not pooling, recovers it).
     _seed(clean_tables, [
-        ("RIGHT", "dieu khoan SLA giao hang khan cap", [1.0, 1.0] + [0.0] * 1022),
+        ("RIGHT", "quy dinh ve thoi gian giao hang khan cap", [1.0, 1.0] + [0.0] * 1022),
         ("WRONG", "chuong muc luat lao dong chung chung", [1.0, 0.9] + [0.0] * 1022),
     ])
     monkeypatch.setattr(r, "embed_query", lambda q: [1.0] + [0.0] * 1023)
@@ -258,7 +262,7 @@ def test_rerank_recovers_doc_when_bare_query_lacks_context(clean_tables, monkeyp
         # Only recognizes RIGHT's content when the rerank query carries the
         # "khan cap" marker — absent from bare "SLA" alone, present only via
         # the concatenated aux query.
-        return [1.0 if ("khan cap" in q and "dieu khoan SLA" in t) else 0.1
+        return [1.0 if ("khan cap" in q and "quy dinh ve thoi gian" in t) else 0.1
                 for t in texts]
 
     monkeypatch.setattr(r.reranker, "score_pairs", fake_score)
