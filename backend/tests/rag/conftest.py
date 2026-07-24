@@ -21,7 +21,12 @@ def rag_conn():
 
 @pytest.fixture
 def clean_tables(rag_conn):
-    rag_conn.execute("TRUNCATE rag_chunks, rag_documents CASCADE")
+    # Schema-qualified: an unqualified TRUNCATE resolves via search_path, and
+    # if rag_test doesn't exist at that exact instant (e.g. two pytest
+    # sessions racing on this same hardcoded schema name), it silently falls
+    # through to public — wiping real ingested documents. Confirmed this
+    # happened in practice: a leftover test row landed in public.rag_documents.
+    rag_conn.execute(f"TRUNCATE {TEST_SCHEMA}.rag_chunks, {TEST_SCHEMA}.rag_documents CASCADE")
     yield rag_conn
 
 
